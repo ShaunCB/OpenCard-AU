@@ -233,12 +233,15 @@ p.tree-element {
   }
   
   /* Scope input overrides specifically to MUI Dialog to avoid breaking floating label layout globally */
-  .MuiDialog-paper input {
-    background-color: #334155 !important;
+  .MuiDialog-paper input,
+  .MuiDialog-paper select,
+  .MuiDialog-paper textarea {
+    background-color: transparent !important;
     color: #f1f5f9 !important;
     border-color: #475569 !important;
   }
-  .MuiDialog-paper input::placeholder {
+  .MuiDialog-paper input::placeholder,
+  .MuiDialog-paper textarea::placeholder {
     color: #94a3b8 !important;
   }
 

@@ -118,9 +118,24 @@ async function callOpenRouter(env, model, systemPrompt, userMessage) {
 
 export default {
   async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    console.log(`[${new Date().toISOString()}] Incoming request: ${request.method} ${url.pathname}`);
+
     // Handle CORS preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
+    }
+
+    // Health check endpoint
+    if (request.method === 'GET' && url.pathname === '/health') {
+      return new Response(JSON.stringify({ 
+        status: "ok", 
+        service: "cdr-recommender", 
+        timestamp: new Date().toISOString() 
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
     if (request.method !== 'POST') {
