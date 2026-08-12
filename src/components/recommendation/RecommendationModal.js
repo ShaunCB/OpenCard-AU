@@ -544,6 +544,13 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
       
       const prescreenData = await fetchAgent('run_prescreen', { bankUrls });
       const topProducts = prescreenData.topProducts;
+      
+      if (!topProducts || topProducts.length === 0) {
+        const err = new Error("No eligible credit cards were found in the provided data sources. Please try adding different banks.");
+        err.name = "DataValidationError";
+        throw err;
+      }
+      
       setAgent('pre', STATUS.DONE);
 
       // Phase 2: parallel agents (Worker fetches /products/{id} for top 5 and runs Math/Risk concurrently)

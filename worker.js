@@ -153,7 +153,7 @@ export default {
       // 1. Pre-Screening: Lazy fetch high-level products
       if (body.action === 'run_prescreen') {
         const bankUrls = (Array.isArray(body.bankUrls) ? body.bankUrls : []).slice(0, 5);
-        if (bankUrls.length === 0) throw new Error("No bankUrls provided");
+        if (bankUrls.length === 0) return new Response(JSON.stringify({ error: 'Bad Request', details: 'No bankUrls provided.' }), { status: 400, headers: corsHeaders });
 
         const fetchPromises = bankUrls.map(bankUrl => {
           const productsUrl = bankUrl.replace(/\/$/, '') + '/banking/products?product-category=CRED_AND_CHRG_CARDS';
@@ -192,7 +192,7 @@ Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markd
       // 2. Parallel Agent Execution (Math & Risk)
       if (body.action === 'run_analysis') {
         const topProducts = (body.topProducts || []).slice(0, 5);
-        if (topProducts.length === 0) throw new Error("No topProducts provided");
+        if (topProducts.length === 0) return new Response(JSON.stringify({ error: 'Bad Request', details: 'No topProducts provided.' }), { status: 400, headers: corsHeaders });
 
         const fetchPromises = topProducts.map(tp => {
           const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/banking/products/' + encodeURIComponent(tp.id);
@@ -251,7 +251,8 @@ Be conservative: if in doubt, flag as a risk.`;
       if (body.action === 'run_synth') {
         const { mathAnalysis, riskAnalysis } = body;
         const topProducts = (body.topProducts || []).slice(0, 5);
-        if (!mathAnalysis || !riskAnalysis) throw new Error('Missing agent analysis outputs.');
+        if (!mathAnalysis || !riskAnalysis) return new Response(JSON.stringify({ error: 'Bad Request', details: 'Missing agent analysis outputs.' }), { status: 400, headers: corsHeaders });
+        if (topProducts.length === 0) return new Response(JSON.stringify({ error: 'Bad Request', details: 'No topProducts provided.' }), { status: 400, headers: corsHeaders });
 
         const fetchPromises = topProducts.map(tp => {
           const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/banking/products/' + encodeURIComponent(tp.id);
