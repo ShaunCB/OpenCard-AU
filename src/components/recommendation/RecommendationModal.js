@@ -380,7 +380,7 @@ function AgentProgressRow({ agent, status }) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-function RecommendationModal({ open, onClose, cdrProducts }) {
+function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
   const classes = useStyles();
 
   // Auth & form state
@@ -480,52 +480,47 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
       const fetchAgent = async (action, bodyData = {}) => {
         const res = await fetch(WORKER_URL, {
           ...baseReq,
-          body: JSON.stringify({ action, profile, cdrProducts, ...bodyData }),
+          body: JSON.stringify({ action, profile, ...bodyData }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.details || data.error || `Failed on ${action}`);
         return data;
       };
 
-      // Phase 1: Pre-Screener
+      // Phase 1: Pre-Screener (Fetches all /products from bankUrls)
       setAgent('pre', STATUS.THINKING);
       startTaglineCycle('parallel');
       
-      const prescreenData = await fetchAgent('run_prescreen');
-      const topProductIds = prescreenData.topProductIds;
+      const prescreenData = await fetchAgent('run_prescreen', { bankUrls });
+      const topProducts = prescreenData.topProducts;
       setAgent('pre', STATUS.DONE);
 
-      // Phase 2: parallel agents — mark both as thinking
+      // Phase 2: parallel agents (Worker fetches /products/{id} for top 5 and runs Math/Risk concurrently)
       setAgent('math', STATUS.THINKING);
       setAgent('risk', STATUS.THINKING);
 
-      // Wrap each promise so we can update agent status as they individually resolve/reject
-      const mathPromise = fetchAgent('run_math', { topProductIds }).then(
-        data  => { setAgent('math', STATUS.DONE);  return data; },
-        err   => { setAgent('math', STATUS.ERROR); throw err; }
-      );
-      const riskPromise = fetchAgent('run_risk', { topProductIds }).then(
-        data  => { setAgent('risk', STATUS.DONE);  return data; },
-        err   => { setAgent('risk', STATUS.ERROR); throw err; }
-      );
-
-      const [mathResult, riskResult] = await Promise.allSettled([mathPromise, riskPromise]);
-
-      if (mathResult.status === 'rejected' || riskResult.status === 'rejected') {
-        const mathErr = mathResult.status === 'rejected' ? `Value analysis: ${mathResult.reason.message}` : '';
-        const riskErr = riskResult.status === 'rejected' ? `Eligibility check: ${riskResult.reason.message}` : '';
-        throw new Error([mathErr, riskErr].filter(Boolean).join(' · '));
+      let mathAnalysis, riskAnalysis;
+      try {
+        const analysisData = await fetchAgent('run_analysis', { topProducts });
+        mathAnalysis = analysisData.mathAnalysis;
+        riskAnalysis = analysisData.riskAnalysis;
+        setAgent('math', STATUS.DONE);
+        setAgent('risk', STATUS.DONE);
+      } catch (err) {
+        setAgent('math', STATUS.ERROR);
+        setAgent('risk', STATUS.ERROR);
+        throw err;
       }
 
-      // Phase 2: synthesizer
+      // Phase 3: synthesizer
       stopTaglines();
       setTaglinePhase('synth');
       setAgent('synth', STATUS.THINKING);
 
       const synthData = await fetchAgent('run_synth', {
-        mathAnalysis: mathResult.value.result,
-        riskAnalysis: riskResult.value.result,
-        userProfile: profile,
+        mathAnalysis,
+        riskAnalysis,
+        topProducts,
       });
 
       setAgent('synth', STATUS.DONE);
@@ -942,7 +937,8 @@ const mapStateToProps = (state) => {
       }
     }
   }
-  return { cdrProducts: allProductDetails };
+  const bankUrls = (state.dataSources || []).map(src => src.url).filter(Boolean);
+  return { cdrProducts: allProductDetails, bankUrls };
 };
 
 export default connect(mapStateToProps)(RecommendationModal);

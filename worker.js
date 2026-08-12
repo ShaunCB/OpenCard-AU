@@ -4,16 +4,38 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, x-passcode',
 };
 
-/**
- * Minifies CDR Product Reference Data (PRD) to reduce LLM token usage.
- * Accepts real CDR product detail objects (from the `data` field of the Get Product Detail response).
- * Extracts cardArt imageUri so the synthesizer AI can embed card images in its output.
- */
+async function fetchBankData(url, env) {
+  const cache = caches.default;
+  const cacheKey = new Request(url, { method: 'GET' });
+  let response = await cache.match(cacheKey);
+  if (!response) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        headers: { 'x-v': '3' },
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+      if (response.ok) {
+        const responseToCache = new Response(response.clone().body, response);
+        responseToCache.headers.append("Cache-Control", "s-maxage=86400");
+        await cache.put(cacheKey, responseToCache);
+      }
+    } catch (e) {
+      clearTimeout(timeout);
+      console.warn("Fetch timeout or error for:", url);
+      return null;
+    }
+  }
+  return response && response.ok ? await response.json() : null;
+}
+
 function minifyCdrData(prdArray) {
   if (!Array.isArray(prdArray)) return [];
 
   return prdArray.map(product => {
-    // Extract card image from the CDR cardArt array (real CDR data format)
     const cardArtEntry = Array.isArray(product.cardArt)
       ? product.cardArt.find(a => a && a.imageUri)
       : null;
@@ -26,6 +48,7 @@ function minifyCdrData(prdArray) {
       isTailored: product.isTailored,
       image: imageUri,
       applicationUri: product.applicationUri || null,
+      _bankUrl: product._bankUrl, // Track origin bank for targeted detail fetching
       features: [],
       fees: [],
       rates: [],
@@ -37,59 +60,39 @@ function minifyCdrData(prdArray) {
         .filter(f => f && f.featureType !== 'OTHER' && f.featureType !== 'DIGITAL_BANKING')
         .map(f => ({ type: f.featureType, info: f.additionalInfo }));
     }
-
     if (product.fees) {
-      minified.fees = product.fees
-        .filter(f => f)
-        .map(f => ({
-          type: f.feeType,
-          // Support both direct amount and fixedAmount.amount CDR patterns
-          amount: f.amount != null ? f.amount : (f.fixedAmount?.amount ?? null),
-          name: f.name
-        }));
+      minified.fees = product.fees.filter(f => f).map(f => ({
+        type: f.feeType,
+        amount: f.amount != null ? f.amount : (f.fixedAmount?.amount ?? null),
+        name: f.name
+      }));
     }
-
     if (product.lendingRates) {
-      minified.rates = product.lendingRates
-        .filter(r => r)
-        .map(r => ({
-          type: r.lendingRateType,
-          rate: r.rate,
-          name: r.name
-        }));
+      minified.rates = product.lendingRates.filter(r => r).map(r => ({
+        type: r.lendingRateType,
+        rate: r.rate,
+        name: r.name
+      }));
     }
-
     if (product.eligibility) {
-      minified.eligibility = product.eligibility
-        .filter(e => e)
-        .map(e => ({
-          type: e.eligibilityType,
-          info: e.additionalInfo,
-          value: e.additionalValue
-        }));
+      minified.eligibility = product.eligibility.filter(e => e).map(e => ({
+        type: e.eligibilityType,
+        info: e.additionalInfo,
+        value: e.additionalValue
+      }));
     }
 
-    // Remove empty arrays and null/undefined fields to save tokens
     Object.keys(minified).forEach(key => {
-      if (Array.isArray(minified[key]) && minified[key].length === 0) {
-        delete minified[key];
-      }
-      if (minified[key] === null || minified[key] === undefined) {
-        delete minified[key];
-      }
+      if (Array.isArray(minified[key]) && minified[key].length === 0) delete minified[key];
+      if (minified[key] === null || minified[key] === undefined) delete minified[key];
     });
 
     return minified;
   });
 }
 
-/**
- * Helper function to call OpenRouter API using native fetch
- */
 async function callOpenRouter(env, model, systemPrompt, userMessage) {
-  if (!env.OPENROUTER_API_KEY) {
-    throw new Error("OPENROUTER_API_KEY is not defined in environment variables.");
-  }
+  if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not defined.");
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -120,134 +123,90 @@ async function callOpenRouter(env, model, systemPrompt, userMessage) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    console.log(`[${new Date().toISOString()}] Incoming request: ${request.method} ${url.pathname}`);
+    if (request.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
-    // Handle CORS preflight
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders });
-    }
-
-    // Health check endpoint
     if (request.method === 'GET' && url.pathname === '/health') {
-      return new Response(JSON.stringify({ 
-        status: "ok", 
-        service: "cdr-recommender", 
-        timestamp: new Date().toISOString() 
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+      return new Response(JSON.stringify({ status: "ok" }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    if (request.method !== 'POST') {
-      return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
-        status: 405,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
+    if (request.method !== 'POST') return new Response(JSON.stringify({ error: 'Method Not Allowed' }), { status: 405, headers: corsHeaders });
 
     try {
-      // Passcode Auth
-      const rawProvided = request.headers.get('x-passcode');
-      const providedPasscode = rawProvided ? rawProvided.trim() : null;
-      const rawValid = env.RECOMMENDATION_PASSCODE;
-      const validPasscode = rawValid ? rawValid.trim() : null;
-
-      if (!validPasscode) {
-        console.warn("WARNING: RECOMMENDATION_PASSCODE not set in env variables.");
-      }
+      const providedPasscode = (request.headers.get('x-passcode') || '').trim();
+      const validPasscode = (env.RECOMMENDATION_PASSCODE || '').trim();
 
       if (!providedPasscode || providedPasscode !== validPasscode) {
-        return new Response(JSON.stringify({ 
-          error: 'Unauthorized. Invalid passcode.'
-          // NOTE: Never expose the valid passcode in the response body
-        }), {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        return new Response(JSON.stringify({ error: 'Unauthorized.' }), { status: 401, headers: corsHeaders });
       }
 
-      // Parse JSON body
-      let body;
-      try {
-        body = await request.json();
-      } catch (e) {
-        return new Response(JSON.stringify({ error: 'Invalid JSON body.' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
+      const body = await request.json();
+      if (body.action === 'verify') return new Response(JSON.stringify({ success: true }), { status: 200, headers: corsHeaders });
 
       const userProfile = body.profile;
-      
-      // If action is verify, just return success since passcode is already validated
-      if (body.action === 'verify') {
-        return new Response(JSON.stringify({ success: true }), {
-          status: 200,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
+      if (!userProfile) return new Response(JSON.stringify({ error: 'User profile is required.' }), { status: 400, headers: corsHeaders });
 
-      if (!userProfile) {
-        return new Response(JSON.stringify({ error: 'User profile is required.' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
+      const sanitizePromptInput = (str, maxLen = 500) => {
+        if (typeof str !== 'string') return 'None';
+        return str.replace(/[\u0000-\u001F\u007F]/g, '').replace(/<[^>]*>/g, '').slice(0, maxLen).trim() || 'None';
+      };
 
-      // Read real CDR product data sent from the client (from Redux state)
-      const rawCdrProducts = body.cdrProducts;
-      if (!Array.isArray(rawCdrProducts) || rawCdrProducts.length === 0) {
-        return new Response(JSON.stringify({ 
-          error: 'No CDR product data provided. Please ensure at least one Data Source is loaded on the Credit & Charge Cards tab before running the analysis.' 
-        }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      // Minify for LLM token efficiency
-      let minifiedData = minifyCdrData(rawCdrProducts);
-      if (Array.isArray(body.topProductIds) && body.topProductIds.length > 0) {
-        minifiedData = minifiedData.filter(p => body.topProductIds.includes(p.id));
-      }
-      const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nAvailable Credit Cards (Minified PRD from CDR):\n${JSON.stringify(minifiedData, null, 2)}`;
-
+      // 1. Pre-Screening: Lazy fetch high-level products
       if (body.action === 'run_prescreen') {
+        const bankUrls = Array.isArray(body.bankUrls) ? body.bankUrls : [];
+        if (bankUrls.length === 0) throw new Error("No bankUrls provided");
+
+        const fetchPromises = bankUrls.map(bankUrl => {
+          const productsUrl = bankUrl.replace(/\/$/, '') + '/banking/products?product-category=CRED_AND_CHRG_CARDS';
+          return fetchBankData(productsUrl, env).then(res => {
+            if (!res || !res.data || !res.data.products) return [];
+            return res.data.products.map(p => ({ ...p, _bankUrl: bankUrl }));
+          });
+        });
+        
+        const allResults = await Promise.all(fetchPromises);
+        const rawCdrProducts = allResults.flat();
+        const minifiedData = minifyCdrData(rawCdrProducts);
+        
+        const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nAvailable Credit Cards:\n${JSON.stringify(minifiedData, null, 2)}`;
         const prescreenPrompt = `You are a high-speed AI screener. Review the user's profile and the full catalog of credit & charge cards provided in the JSON data.
 Filter the list and select the Top 5 most relevant product IDs for this user based on their primary goal, income, and spend.
 Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markdown formatting, backticks, or any explanation. Example: ["CC-01", "CC-02"]`;
+        
         const prescreenAnalysis = await callOpenRouter(env, 'moonshotai/kimi-k2.7-code', prescreenPrompt, dataContext);
         
         let topProductIds = [];
         try {
           const jsonMatch = prescreenAnalysis.match(/\[.*\]/s);
-          const jsonStr = jsonMatch ? jsonMatch[0] : prescreenAnalysis;
-          topProductIds = JSON.parse(jsonStr);
+          topProductIds = JSON.parse(jsonMatch ? jsonMatch[0] : prescreenAnalysis);
         } catch (e) {
-          console.error("Prescreen parse error", e, prescreenAnalysis);
           topProductIds = minifiedData.slice(0, 5).map(p => p.id);
         }
         
-        return new Response(JSON.stringify({ success: true, topProductIds }), {
-          status: 200,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        const topProducts = minifiedData
+          .filter(p => topProductIds.includes(p.id))
+          .map(p => ({ id: p.id, bankUrl: p._bankUrl }));
+
+        return new Response(JSON.stringify({ success: true, topProducts }), { status: 200, headers: corsHeaders });
       }
 
-      if (body.action === 'run_math') {
-        const { income, monthlySpend, primaryGoal, needs: rawExtraNeeds } = userProfile;
-        const sanitizePromptInput = (str, maxLen = 500) => {
-          if (typeof str !== 'string') return 'None';
-          return str
-            .replace(/[\u0000-\u001F\u007F]/g, '')
-            .replace(/<[^>]*>/g, '')
-            .slice(0, maxLen)
-            .trim() || 'None';
-        };
-        const safeExtraNeeds = sanitizePromptInput(rawExtraNeeds);
-        const mathAgentPrompt = `You are a quantitative financial analyst. Using the user's EXACT financial data below, calculate the true annual cost and value for each credit/charge card in the PRD.
+      // 2. Parallel Agent Execution (Math & Risk)
+      if (body.action === 'run_analysis') {
+        const topProducts = body.topProducts || [];
+        if (topProducts.length === 0) throw new Error("No topProducts provided");
 
+        const fetchPromises = topProducts.map(tp => {
+          const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/banking/products/' + encodeURIComponent(tp.id);
+          return fetchBankData(detailUrl, env).then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
+        });
+        
+        const detailResults = (await Promise.all(fetchPromises)).filter(p => p);
+        const minifiedData = minifyCdrData(detailResults);
+        const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nCandidate Cards Details:\n${JSON.stringify(minifiedData, null, 2)}`;
+
+        const { income, monthlySpend, primaryGoal, age, needs: rawExtraNeeds } = userProfile;
+        const safeExtraNeeds = sanitizePromptInput(rawExtraNeeds);
+
+        const mathAgentPrompt = `You are a quantitative financial analyst. Using the user's EXACT financial data below, calculate the true annual cost and value for each credit/charge card in the PRD.
 User Data:
 - Annual Income: $${income || 'Unknown'}
 - Monthly Spend: $${monthlySpend || 'Unknown'} (assume 30% is carried as revolving balance for interest calc if it is a credit card)
@@ -264,17 +223,8 @@ For each card, output:
 6. Goal Alignment score (1-5) for the stated Primary Goal
 
 Be precise with numbers. Do not round. Output structured reasoning. Note whether each card is a Credit Card or Charge Card.`;
-        const mathAnalysis = await callOpenRouter(env, 'deepseek/deepseek-v4-pro', mathAgentPrompt, dataContext);
-        return new Response(JSON.stringify({ success: true, result: mathAnalysis }), {
-          status: 200,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
 
-      if (body.action === 'run_risk') {
-        const { income, age, primaryGoal } = userProfile;
         const riskAgentPrompt = `You are an Australian consumer credit compliance expert. Check every eligibility criterion in the PRD against the user's profile and flag any issue.
-
 User Data:
 - Age: ${age || 'Unknown'}
 - Annual Income: $${income || 'Unknown'}
@@ -287,39 +237,29 @@ For each card, output a risk assessment:
 - If critical data is absent from the PRD, explicitly state 'DATA GAP — verify with issuer'
 
 Be conservative: if in doubt, flag as a risk.`;
-        const riskAnalysis = await callOpenRouter(env, 'deepseek/deepseek-v4-flash', riskAgentPrompt, dataContext);
-        return new Response(JSON.stringify({ success: true, result: riskAnalysis }), {
-          status: 200,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+
+        // Execute Agent 2 and Agent 3 CONCURRENTLY using Promise.all()
+        const [mathAnalysis, riskAnalysis] = await Promise.all([
+          callOpenRouter(env, 'deepseek/deepseek-v4-pro', mathAgentPrompt, dataContext),
+          callOpenRouter(env, 'deepseek/deepseek-v4-flash', riskAgentPrompt, dataContext)
+        ]);
+
+        return new Response(JSON.stringify({ success: true, mathAnalysis, riskAnalysis }), { status: 200, headers: corsHeaders });
       }
 
+      // 3. Final Synthesis
       if (body.action === 'run_synth') {
-        const { mathAnalysis, riskAnalysis } = body;
-        if (!mathAnalysis || !riskAnalysis) {
-           return new Response(JSON.stringify({ error: 'Missing agent analysis outputs.' }), {
-             status: 400,
-             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-           });
-        }
+        const { mathAnalysis, riskAnalysis, topProducts } = body;
+        if (!mathAnalysis || !riskAnalysis) throw new Error('Missing agent analysis outputs.');
+
+        const fetchPromises = (topProducts || []).map(tp => {
+          const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/banking/products/' + encodeURIComponent(tp.id);
+          return fetchBankData(detailUrl, env).then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
+        });
+        const detailResults = (await Promise.all(fetchPromises)).filter(p => p);
+        const minifiedData = minifyCdrData(detailResults);
         
-        // Re-minify CDR data so the Synthesizer has access to card names and image URLs
-        const minifiedData = minifyCdrData(Array.isArray(body.cdrProducts) ? body.cdrProducts : []);
-        
-        const { primaryGoal, needs: rawExtraNeeds } = body.userProfile || {};
-        
-        // Sanitize free-text input to prevent prompt injection:
-        // Strip control characters, HTML tags, and excessive length
-        const sanitizePromptInput = (str, maxLen = 500) => {
-          if (typeof str !== 'string') return 'None';
-          return str
-            .replace(/[\u0000-\u001F\u007F]/g, '')  // strip control chars
-            .replace(/<[^>]*>/g, '')                  // strip any HTML tags
-            .slice(0, maxLen)                         // limit length
-            .trim() || 'None';
-        };
-        const safeExtraNeeds = sanitizePromptInput(rawExtraNeeds);
-        const safePrimaryGoal = sanitizePromptInput(primaryGoal, 100);
+        const safeExtraNeeds = sanitizePromptInput(userProfile.needs);
         
         const synthesizerPrompt = `You are a senior financial product comparison editor. Synthesise the Math and Risk agent reports into a strict JSON object. DO NOT output markdown, code blocks, or any other text. Output ONLY valid JSON.
 
@@ -352,27 +292,18 @@ CRITICAL INSTRUCTIONS:
 2. The cards array MUST contain an object for EVERY card analyzed.
 3. For keyRisks, use concise strings without bullet points or emojis (the UI will add the 🔺).
 4. estNetAnnualCost.numValue must be a raw number representing the financial cost (e.g., if the user makes a net profit of $150, numValue is -150).`;
+
         const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards PRD Context:\n${JSON.stringify(minifiedData, null, 2)}\n\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
 
         const finalRecommendation = await callOpenRouter(env, 'openai/gpt-oss-20b', synthesizerPrompt, synthesizerUserMessage);
         
-        return new Response(JSON.stringify({ success: true, recommendation: finalRecommendation }), {
-          status: 200,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        return new Response(JSON.stringify({ success: true, recommendation: finalRecommendation }), { status: 200, headers: corsHeaders });
       }
 
-      return new Response(JSON.stringify({ error: 'Invalid action provided.' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-
+      return new Response(JSON.stringify({ error: 'Invalid action provided.' }), { status: 400, headers: corsHeaders });
     } catch (error) {
       console.error("Worker Error:", error);
-      return new Response(JSON.stringify({ error: 'An error occurred while generating the recommendation.', details: error.message }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+      return new Response(JSON.stringify({ error: 'An error occurred while generating the recommendation.', details: error.message }), { status: 500, headers: corsHeaders });
     }
   }
 };
