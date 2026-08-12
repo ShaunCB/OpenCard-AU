@@ -152,7 +152,7 @@ export default {
 
       // 1. Pre-Screening: Lazy fetch high-level products
       if (body.action === 'run_prescreen') {
-        const bankUrls = Array.isArray(body.bankUrls) ? body.bankUrls : [];
+        const bankUrls = (Array.isArray(body.bankUrls) ? body.bankUrls : []).slice(0, 5);
         if (bankUrls.length === 0) throw new Error("No bankUrls provided");
 
         const fetchPromises = bankUrls.map(bankUrl => {
@@ -191,7 +191,7 @@ Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markd
 
       // 2. Parallel Agent Execution (Math & Risk)
       if (body.action === 'run_analysis') {
-        const topProducts = body.topProducts || [];
+        const topProducts = (body.topProducts || []).slice(0, 5);
         if (topProducts.length === 0) throw new Error("No topProducts provided");
 
         const fetchPromises = topProducts.map(tp => {
@@ -249,10 +249,11 @@ Be conservative: if in doubt, flag as a risk.`;
 
       // 3. Final Synthesis
       if (body.action === 'run_synth') {
-        const { mathAnalysis, riskAnalysis, topProducts } = body;
+        const { mathAnalysis, riskAnalysis } = body;
+        const topProducts = (body.topProducts || []).slice(0, 5);
         if (!mathAnalysis || !riskAnalysis) throw new Error('Missing agent analysis outputs.');
 
-        const fetchPromises = (topProducts || []).map(tp => {
+        const fetchPromises = topProducts.map(tp => {
           const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/banking/products/' + encodeURIComponent(tp.id);
           return fetchBankData(detailUrl, env).then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
         });
