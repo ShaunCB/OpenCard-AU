@@ -530,7 +530,13 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
 
       setAgent('synth', STATUS.DONE);
       stopTaglines();
-      setRecommendation(synthData.recommendation);
+      
+      try {
+        const cleaned = synthData.recommendation.replace(/```json/gi, '').replace(/```/g, '').trim();
+        setRecommendation(JSON.parse(cleaned));
+      } catch (e) {
+        throw new Error("Failed to parse AI recommendation. Please try again.");
+      }
     } catch (err) {
       stopTaglines();
       setError(err.message);
@@ -725,19 +731,111 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
         ) : (
           /* ── Results ─────────────────────────────────────────────────────── */
           <>
-            <div
-              className={classes.markdownWrapper}
-              onClick={handleMarkdownClick}
-              dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(
-                  marked(recommendation.replace(
-                    /https:\/\/shauncb\.github\.io\/OpenCard-AU\/images\//g,
-                    import.meta.env.BASE_URL + 'images/'
-                  )),
-                  { ADD_TAGS: ['button'], ADD_ATTR: ['class', 'data-expl'] }
-                )
-              }}
-            />
+            <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #e2e8f0' }}>
+              <Typography variant="subtitle2" style={{ color: '#0f172a' }}>
+                <strong>AI Recommendations for:</strong> {recommendation.goalSummary || "Your profile"}
+              </Typography>
+            </div>
+
+            {recommendation.verificationChecklist && recommendation.verificationChecklist.length > 0 && (
+              <div className="checklist-box">
+                <h4>✅ Verification Required Checklist</h4>
+                <ul>
+                  {recommendation.verificationChecklist.map((item, i) => <li key={i}>{item}</li>)}
+                </ul>
+              </div>
+            )}
+
+            <div className="recommender-grid">
+              {recommendation.cards && recommendation.cards.map((card, idx) => (
+                <div key={idx} className="product-card">
+                  {card.image ? (
+                    <img src={card.image.replace(/https:\/\/shauncb\.github\.io\/OpenCard-AU\/images\//g, import.meta.env.BASE_URL + 'images/')} alt={card.name} className="product-card-image" />
+                  ) : (
+                    <div className="product-card-image" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>No Image</div>
+                  )}
+                  
+                  <div className="product-card-header">
+                    <h3 className="product-card-title">{card.name}</h3>
+                    <p className="product-card-brand">{card.brand}</p>
+                  </div>
+
+                  <div className="metric-row">
+                    <span className="metric-label">Eligibility Status</span>
+                    <span className="metric-value">{card.eligibility}</span>
+                  </div>
+                  
+                  <div className="metric-row">
+                    <span className="metric-label">Annual Fee</span>
+                    <span className="metric-value">{card.annualFee}</span>
+                  </div>
+
+                  <div className="metric-row">
+                    <span className="metric-label">Est. Annual Interest</span>
+                    <span className="metric-value">
+                      <button type="button" className="info-btn" onClick={(e) => { e.preventDefault(); setInfoModalState({ open: true, content: card.estAnnualInterest?.explanation }); }}>
+                        {card.estAnnualInterest?.display} ⓘ
+                      </button>
+                    </span>
+                  </div>
+
+                  <div className="metric-row">
+                    <span className="metric-label">Est. Reward Value</span>
+                    <span className="metric-value">
+                      <button type="button" className="info-btn" onClick={(e) => { e.preventDefault(); setInfoModalState({ open: true, content: card.estRewardValue?.explanation }); }}>
+                        {card.estRewardValue?.display} ⓘ
+                      </button>
+                    </span>
+                  </div>
+
+                  <div className="metric-row">
+                    <span className="metric-label">Est. Net Annual Cost</span>
+                    <span className={`metric-value ${(card.estNetAnnualCost && card.estNetAnnualCost.numValue < 0) ? 'green' : ''}`}>
+                      <button type="button" className="info-btn" onClick={(e) => { e.preventDefault(); setInfoModalState({ open: true, content: card.estNetAnnualCost?.explanation }); }}>
+                        {card.estNetAnnualCost?.display} ⓘ
+                      </button>
+                    </span>
+                  </div>
+
+                  <div className="metric-row" style={{ flexDirection: 'column', borderBottom: 'none' }}>
+                    <span className="metric-label" style={{ paddingBottom: '4px' }}>Key Risks</span>
+                    <ul className="key-risks-list">
+                      {card.keyRisks && card.keyRisks.map((risk, i) => <li key={i}>🔺 {risk}</li>)}
+                    </ul>
+                  </div>
+
+                  <div style={{ marginTop: 'auto', paddingTop: '16px' }}>
+                    <Button 
+                      variant={idx < 2 ? "contained" : "outlined"} 
+                      color="primary" 
+                      fullWidth 
+                      href={card.applicationUri || '#'} 
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {idx < 2 ? "Apply Now" : "More Info"}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {recommendation.topPickReason && (
+              <div style={{ marginTop: '24px', padding: '16px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px' }}>
+                <Typography variant="subtitle1" style={{ color: '#92400e', fontWeight: 'bold' }}>🏆 Top Pick:</Typography>
+                <Typography variant="body2" style={{ color: '#92400e' }}>{recommendation.topPickReason}</Typography>
+              </div>
+            )}
+
+            {recommendation.dataGaps && recommendation.dataGaps.length > 0 && (
+              <div style={{ marginTop: '16px', padding: '12px', borderLeft: '4px solid #f59e0b', backgroundColor: '#fffbeb' }}>
+                <Typography variant="subtitle2" style={{ color: '#b45309' }}>⚠️ Data Gaps</Typography>
+                <ul style={{ margin: 0, paddingLeft: '20px', color: '#b45309', fontSize: '0.85rem' }}>
+                  {recommendation.dataGaps.map((gap, i) => <li key={i}>{gap}</li>)}
+                </ul>
+              </div>
+            )}
+
             <Typography variant="caption" style={{ color: '#64748b', display: 'block', marginTop: 16, textAlign: 'center' }}>
               <em>* Estimations based on user-provided monthly spend and flying preference.</em>
             </Typography>

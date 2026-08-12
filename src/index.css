@@ -163,6 +163,101 @@ p.tree-element {
   border-radius: 2px;
 }
 
+/* Recommender JSON Grid Layout */
+.recommender-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  margin-top: 16px;
+}
+.product-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+.product-card-image {
+  width: 100%;
+  height: 140px;
+  object-fit: contain;
+  margin-bottom: 16px;
+  background-color: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+.product-card-header {
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 12px;
+}
+.product-card-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #0f172a;
+  margin: 0 0 4px 0;
+}
+.product-card-brand {
+  font-size: 0.9rem;
+  color: #64748b;
+  margin: 0;
+}
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-bottom: 1px dashed #e2e8f0;
+}
+.metric-row:last-child {
+  border-bottom: none;
+}
+.metric-label {
+  font-size: 0.85rem;
+  color: #475569;
+  flex: 1;
+  padding-right: 8px;
+}
+.metric-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1e293b;
+  text-align: right;
+  flex: 1;
+}
+.metric-value.green {
+  color: #16a34a;
+}
+.key-risks-list {
+  margin: 8px 0 0 0;
+  padding-left: 0;
+  list-style: none;
+}
+.key-risks-list li {
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+  color: #b91c1c;
+}
+.checklist-box {
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+.checklist-box h4 {
+  margin: 0 0 8px 0;
+  color: #166534;
+}
+.checklist-box ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #15803d;
+  font-size: 0.9rem;
+}
+
 @media (prefers-color-scheme: dark) {
   body {
     background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
@@ -306,5 +401,41 @@ p.tree-element {
   .MuiDialog-paper .info-btn:hover {
     color: #60a5fa;
   }
+
+  .product-card {
+    background: #1e293b;
+    border-color: #334155;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+  }
+  .product-card-image {
+    background-color: #0f172a;
+    border-color: #334155;
+  }
+  .product-card-header, .metric-row {
+    border-color: #334155;
+  }
+  .product-card-title {
+    color: #f1f5f9;
+  }
+  .product-card-brand, .metric-label {
+    color: #94a3b8;
+  }
+  .metric-value {
+    color: #e2e8f0;
+  }
+  .metric-value.green {
+    color: #4ade80;
+  }
+  .key-risks-list li {
+    color: #f87171;
+  }
+  .checklist-box {
+    background-color: rgba(22, 101, 52, 0.2);
+    border-color: #166534;
+  }
+  .checklist-box h4, .checklist-box ul {
+    color: #86efac;
+  }
 }
+
 
