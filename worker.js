@@ -217,7 +217,7 @@ export default {
         const prescreenPrompt = `You are a high-speed AI screener. Review the user's profile and the full catalog of credit & charge cards provided in the JSON data.
 Filter the list and select the Top 5 most relevant product IDs for this user based on their primary goal, income, and spend.
 Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markdown formatting, backticks, or any explanation. Example: ["CC-01", "CC-02"]`;
-        const prescreenAnalysis = await callOpenRouter(env, 'google/gemini-2.5-flash', prescreenPrompt, dataContext);
+        const prescreenAnalysis = await callOpenRouter(env, 'moonshotai/kimi-k2.7', prescreenPrompt, dataContext);
         
         let topProductIds = [];
         try {
@@ -264,7 +264,7 @@ For each card, output:
 6. Goal Alignment score (1-5) for the stated Primary Goal
 
 Be precise with numbers. Do not round. Output structured reasoning. Note whether each card is a Credit Card or Charge Card.`;
-        const mathAnalysis = await callOpenRouter(env, 'deepseek/deepseek-chat', mathAgentPrompt, dataContext);
+        const mathAnalysis = await callOpenRouter(env, 'deepseek/deepseek-v4-pro', mathAgentPrompt, dataContext);
         return new Response(JSON.stringify({ success: true, result: mathAnalysis }), {
           status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -287,7 +287,7 @@ For each card, output a risk assessment:
 - If critical data is absent from the PRD, explicitly state 'DATA GAP — verify with issuer'
 
 Be conservative: if in doubt, flag as a risk.`;
-        const riskAnalysis = await callOpenRouter(env, 'google/gemini-2.5-flash', riskAgentPrompt, dataContext);
+        const riskAnalysis = await callOpenRouter(env, 'deepseek/deepseek-v4-flash', riskAgentPrompt, dataContext);
         return new Response(JSON.stringify({ success: true, result: riskAnalysis }), {
           status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -335,7 +335,8 @@ JSON SCHEMA:
       "applicationUri": "application url or null",
       "eligibility": "Eligibility status (e.g. 'Verification Required (Reason)')",
       "annualFee": "Annual fee string",
-      "estAnnualInterest": { "display": "Value string or 'N/A (Charge Card)'", "explanation": "Brief explanation of calculation" },
+      "estAnnualInterest": { "display": "Value string", "explanation": "Brief explanation of calculation" }, // set to null if Charge Card
+      "avoidableFees": { "display": "Value string", "explanation": "Brief explanation of avoidable fees" }, // omit if Credit Card, include only if Charge Card
       "estRewardValue": { "display": "Value string", "explanation": "Brief explanation" },
       "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Brief explanation. numValue must be a number representing the cost (negative for profit/gain, positive for cost)" },
       "keyRisks": ["High revert rate", "Risk 2"], // Concise high-priority risks not in global checklist
@@ -353,7 +354,7 @@ CRITICAL INSTRUCTIONS:
 4. estNetAnnualCost.numValue must be a raw number representing the financial cost (e.g., if the user makes a net profit of $150, numValue is -150).`;
         const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards PRD Context:\n${JSON.stringify(minifiedData, null, 2)}\n\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
 
-        const finalRecommendation = await callOpenRouter(env, 'google/gemini-2.5-flash', synthesizerPrompt, synthesizerUserMessage);
+        const finalRecommendation = await callOpenRouter(env, 'openai/gpt-oss-20b', synthesizerPrompt, synthesizerUserMessage);
         
         return new Response(JSON.stringify({ success: true, recommendation: finalRecommendation }), {
           status: 200,

@@ -37,7 +37,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_prescreen',
     label: 'Pre-Screener',
     description: 'Filtering all available market cards...',
-    model: 'Gemini 2.5 Flash',
+    model: 'KIMI 2.7 (MOONSHOT AI)',
     icon: '🔍',
   },
   {
@@ -45,7 +45,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_math',
     label: 'Value & Cost Analyst',
     description: 'Calculating fees, interest & estimated rewards return',
-    model: 'DeepSeek Reasoner',
+    model: 'DEEPSEEK V4 PRO (1.6T REASONING)',
     icon: '💰',
   },
   {
@@ -53,7 +53,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_risk',
     label: 'Eligibility Checker',
     description: 'Verifying you qualify and flagging any hidden risks',
-    model: 'Gemini 2.5 Flash',
+    model: 'DEEPSEEK V4 FLASH',
     icon: '🛡️',
   },
   {
@@ -61,7 +61,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_synth',
     label: 'Recommendation Editor',
     description: 'Synthesising findings into your personalised shortlist',
-    model: 'Gemini 2.5 Flash',
+    model: 'GPT-OSS-20B (OPENAI)',
     icon: '✨',
   },
 ];
@@ -387,9 +387,9 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
   const [passcode, setPasscode] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [primaryGoal, setPrimaryGoal] = useState('');
-  const [income, setIncome] = useState('60000');
+  const [income, setIncome] = useState('100000');
   const [monthlySpend, setMonthlySpend] = useState('2500');
-  const [age, setAge] = useState('28');
+  const [age, setAge] = useState('30');
   const [extraNeeds, setExtraNeeds] = useState('');
 
   // Orchestration state
@@ -560,9 +560,9 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
     setPasscode('');
     setIsAuthenticated(false);
     setPrimaryGoal('');
-    setIncome('60000');
+    setIncome('100000');
     setMonthlySpend('2500');
-    setAge('28');
+    setAge('30');
     setExtraNeeds('');
     setRecommendation(null);
     setError(null);
@@ -770,14 +770,25 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
                     <span className="metric-value">{card.annualFee}</span>
                   </div>
 
-                  <div className="metric-row">
-                    <span className="metric-label">Est. Annual Interest</span>
-                    <span className="metric-value">
-                      <button type="button" className="info-btn" onClick={(e) => { e.preventDefault(); setInfoModalState({ open: true, content: card.estAnnualInterest?.explanation }); }}>
-                        {card.estAnnualInterest?.display} ⓘ
-                      </button>
-                    </span>
-                  </div>
+                  {card.estAnnualInterest ? (
+                    <div className="metric-row">
+                      <span className="metric-label">Est. Annual Interest</span>
+                      <span className="metric-value">
+                        <button type="button" className="info-btn" onClick={(e) => { e.preventDefault(); setInfoModalState({ open: true, content: card.estAnnualInterest?.explanation }); }}>
+                          {card.estAnnualInterest?.display} ⓘ
+                        </button>
+                      </span>
+                    </div>
+                  ) : card.avoidableFees ? (
+                    <div className="metric-row">
+                      <span className="metric-label">Avoidable Fees</span>
+                      <span className="metric-value">
+                        <button type="button" className="info-btn" onClick={(e) => { e.preventDefault(); setInfoModalState({ open: true, content: card.avoidableFees?.explanation }); }}>
+                          {card.avoidableFees?.display} ⓘ
+                        </button>
+                      </span>
+                    </div>
+                  ) : null}
 
                   <div className="metric-row">
                     <span className="metric-label">Est. Reward Value</span>
