@@ -217,7 +217,7 @@ export default {
         const prescreenPrompt = `You are a high-speed AI screener. Review the user's profile and the full catalog of credit & charge cards provided in the JSON data.
 Filter the list and select the Top 5 most relevant product IDs for this user based on their primary goal, income, and spend.
 Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markdown formatting, backticks, or any explanation. Example: ["CC-01", "CC-02"]`;
-        const prescreenAnalysis = await callOpenRouter(env, 'moonshotai/kimi-k2.7', prescreenPrompt, dataContext);
+        const prescreenAnalysis = await callOpenRouter(env, 'moonshotai/kimi-k2.7-code', prescreenPrompt, dataContext);
         
         let topProductIds = [];
         try {

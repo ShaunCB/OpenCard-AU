@@ -37,7 +37,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_prescreen',
     label: 'Pre-Screener',
     description: 'Filtering all available market cards...',
-    model: 'KIMI 2.7 (MOONSHOT AI)',
+    model: 'KIMI K2.7 (262K CONTEXT)',
     icon: '🔍',
   },
   {
