@@ -396,6 +396,9 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [recommendation, setRecommendation] = useState(null);
+  
+  // Info tooltip modal state
+  const [infoModalState, setInfoModalState] = useState({ open: false, content: '' });
 
   // Multi-agent progress: map of agentId → STATUS value
   const [agentStatus, setAgentStatus] = useState({
@@ -533,6 +536,15 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── Delegated Click Handler for AI Tooltips ────────────────────────────────
+  const handleMarkdownClick = (e) => {
+    const btn = e.target.closest('.info-btn');
+    if (btn) {
+      const expl = btn.getAttribute('data-expl');
+      setInfoModalState({ open: true, content: expl || 'No explanation provided.' });
     }
   };
 
@@ -712,19 +724,44 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
           </>
         ) : (
           /* ── Results ─────────────────────────────────────────────────────── */
-          <div
-            className={classes.markdownWrapper}
-            dangerouslySetInnerHTML={{
-              __html: DOMPurify.sanitize(
-                marked(recommendation.replace(
-                  /https:\/\/shauncb\.github\.io\/OpenCard-AU\/images\//g,
-                  import.meta.env.BASE_URL + 'images/'
-                )),
-                { ADD_TAGS: ['abbr'], ADD_ATTR: ['title'] }
-              )
-            }}
-          />
+          <>
+            <div
+              className={classes.markdownWrapper}
+              onClick={handleMarkdownClick}
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(
+                  marked(recommendation.replace(
+                    /https:\/\/shauncb\.github\.io\/OpenCard-AU\/images\//g,
+                    import.meta.env.BASE_URL + 'images/'
+                  )),
+                  { ADD_TAGS: ['button'], ADD_ATTR: ['class', 'data-expl'] }
+                )
+              }}
+            />
+            <Typography variant="caption" style={{ color: '#64748b', display: 'block', marginTop: 16, textAlign: 'center' }}>
+              <em>* Estimations based on user-provided monthly spend and flying preference.</em>
+            </Typography>
+          </>
         )}
+
+        {/* Mobile-Friendly Tooltip Modal */}
+        <Dialog 
+          open={infoModalState.open} 
+          onClose={() => setInfoModalState({ ...infoModalState, open: false })} 
+          maxWidth="xs" 
+          fullWidth
+          aria-labelledby="tooltip-dialog-title"
+        >
+          <DialogTitle id="tooltip-dialog-title">Calculation Breakdown</DialogTitle>
+          <DialogContent>
+            <Typography variant="body1">{infoModalState.content}</Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setInfoModalState({ ...infoModalState, open: false })} color="primary" variant="contained">
+              Close
+            </Button>
+          </DialogActions>
+        </Dialog>
 
       </DialogContent>
 

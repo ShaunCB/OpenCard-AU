@@ -142,17 +142,25 @@ p.tree-element {
   border-bottom: 1px solid rgba(226, 232, 240, 0.9);
 }
 
-/* Tooltip/Abbr styles for AI Explanations */
-.MuiDialog-paper abbr[title] {
-  text-decoration: underline dotted;
-  cursor: help;
-  position: relative;
+/* Tooltip/Button styles for AI Explanations */
+.MuiDialog-paper .info-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted #3b82f6;
+  text-underline-offset: 4px;
 }
-.MuiDialog-paper abbr[title]::after {
-  content: " ⓘ";
-  font-size: 0.9em;
+.MuiDialog-paper .info-btn:hover {
   color: #3b82f6;
-  opacity: 0.8;
+}
+.MuiDialog-paper .info-btn:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -291,8 +299,11 @@ p.tree-element {
     color: #f1f5f9;
   }
 
-  /* Tooltip icon color for dark mode */
-  .MuiDialog-paper abbr[title]::after {
+  /* Tooltip button color for dark mode */
+  .MuiDialog-paper .info-btn {
+    text-decoration-color: #60a5fa;
+  }
+  .MuiDialog-paper .info-btn:hover {
     color: #60a5fa;
   }
 }
