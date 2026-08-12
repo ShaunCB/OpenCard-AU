@@ -1,0 +1,21 @@
+{
+  "name": "cdr-recommender-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker deploy tooling for the OpenCard-AU CDR Recommender (cdr-recommender).",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "deploy:prod": "wrangler deploy --env production",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail",
+    "secret:passcode": "wrangler secret put RECOMMENDATION_PASSCODE",
+    "secret:openrouter": "wrangler secret put OPENROUTER_API_KEY",
+    "whoami": "wrangler whoami"
+  },
+  "devDependencies": {
+    "wrangler": "^3.80.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

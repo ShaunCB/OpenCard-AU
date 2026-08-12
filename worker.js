@@ -6,17 +6,25 @@ const corsHeaders = {
 
 /**
  * Minifies CDR Product Reference Data (PRD) to reduce LLM token usage.
+ * Accepts real CDR product detail objects (from the `data` field of the Get Product Detail response).
+ * Extracts cardArt imageUri so the synthesizer AI can embed card images in its output.
  */
 function minifyCdrData(prdArray) {
   if (!Array.isArray(prdArray)) return [];
 
   return prdArray.map(product => {
+    // Extract card image from the CDR cardArt array (real CDR data format)
+    const cardArtEntry = Array.isArray(product.cardArt)
+      ? product.cardArt.find(a => a && a.imageUri)
+      : null;
+    const imageUri = cardArtEntry ? cardArtEntry.imageUri : null;
+
     const minified = {
       id: product.productId,
       name: product.name,
-      brand: product.brand,
+      brand: product.brand || product.brandName,
       isTailored: product.isTailored,
-      image: product.image,
+      image: imageUri,
       features: [],
       fees: [],
       rates: [],
@@ -25,34 +33,42 @@ function minifyCdrData(prdArray) {
 
     if (product.features) {
       minified.features = product.features
-        .filter(f => f.featureType !== 'OTHER' && f.featureType !== 'DIGITAL_BANKING')
+        .filter(f => f && f.featureType !== 'OTHER' && f.featureType !== 'DIGITAL_BANKING')
         .map(f => ({ type: f.featureType, info: f.additionalInfo }));
     }
 
     if (product.fees) {
-      minified.fees = product.fees.map(f => ({
-        type: f.feeType,
-        amount: f.amount,
-        name: f.name
-      }));
+      minified.fees = product.fees
+        .filter(f => f)
+        .map(f => ({
+          type: f.feeType,
+          // Support both direct amount and fixedAmount.amount CDR patterns
+          amount: f.amount != null ? f.amount : (f.fixedAmount?.amount ?? null),
+          name: f.name
+        }));
     }
 
     if (product.lendingRates) {
-      minified.rates = product.lendingRates.map(r => ({
-        type: r.lendingRateType,
-        rate: r.rate,
-        name: r.name
-      }));
+      minified.rates = product.lendingRates
+        .filter(r => r)
+        .map(r => ({
+          type: r.lendingRateType,
+          rate: r.rate,
+          name: r.name
+        }));
     }
 
     if (product.eligibility) {
-      minified.eligibility = product.eligibility.map(e => ({
-        type: e.eligibilityType,
-        info: e.additionalInfo,
-        value: e.additionalValue
-      }));
+      minified.eligibility = product.eligibility
+        .filter(e => e)
+        .map(e => ({
+          type: e.eligibilityType,
+          info: e.additionalInfo,
+          value: e.additionalValue
+        }));
     }
 
+    // Remove empty arrays and null/undefined fields to save tokens
     Object.keys(minified).forEach(key => {
       if (Array.isArray(minified[key]) && minified[key].length === 0) {
         delete minified[key];
@@ -64,50 +80,6 @@ function minifyCdrData(prdArray) {
 
     return minified;
   });
-}
-
-// Mock function to simulate fetching PRD data from a Data Holder
-async function fetchCdrData() {
-  const mockData = [
-    {
-      productId: "CC-001",
-      name: "Low Rate Master Card",
-      brand: "Bank of AU",
-      image: "https://shauncb.github.io/OpenCard-AU/images/low_rate_card.jpg",
-      features: [
-        { featureType: "COMPLEMENTARY_INSURANCE", additionalInfo: "Travel insurance included" }
-      ],
-      fees: [
-        { feeType: "PERIODIC", name: "Annual Fee", amount: "59.00" }
-      ],
-      lendingRates: [
-        { lendingRateType: "PURCHASE", name: "Purchase Rate", rate: "0.1199" },
-      ],
-      eligibility: [
-        { eligibilityType: "MIN_AGE", additionalValue: "18" },
-        { eligibilityType: "MIN_INCOME", additionalValue: "35000" }
-      ]
-    },
-    {
-      productId: "CC-002",
-      name: "Platinum Rewards Visa",
-      brand: "Bank of AU",
-      image: "https://shauncb.github.io/OpenCard-AU/images/platinum_card.jpg",
-      features: [
-        { featureType: "REWARDS_PROGRAM", additionalInfo: "1 point per $1 spent" }
-      ],
-      fees: [
-        { feeType: "PERIODIC", name: "Annual Fee", amount: "250.00" }
-      ],
-      lendingRates: [
-        { lendingRateType: "PURCHASE", name: "Purchase Rate", rate: "0.1999" }
-      ],
-      eligibility: [
-        { eligibilityType: "MIN_INCOME", additionalValue: "75000" }
-      ]
-    }
-  ];
-  return minifyCdrData(mockData);
 }
 
 /**
@@ -171,8 +143,8 @@ export default {
 
       if (!providedPasscode || providedPasscode !== validPasscode) {
         return new Response(JSON.stringify({ 
-          error: 'Unauthorized. Invalid passcode.',
-          debug: `Provided: '${providedPasscode}', Expected: '${validPasscode}'`
+          error: 'Unauthorized. Invalid passcode.'
+          // NOTE: Never expose the valid passcode in the response body
         }), {
           status: 401,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -207,9 +179,20 @@ export default {
         });
       }
 
-      // Fetch and minify CDR Data
-      const minifiedData = await fetchCdrData();
-      const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nAvailable Credit Cards (Minified PRD):\n${JSON.stringify(minifiedData, null, 2)}`;
+      // Read real CDR product data sent from the client (from Redux state)
+      const rawCdrProducts = body.cdrProducts;
+      if (!Array.isArray(rawCdrProducts) || rawCdrProducts.length === 0) {
+        return new Response(JSON.stringify({ 
+          error: 'No CDR product data provided. Please ensure at least one Data Source is loaded on the Credit & Charge Cards tab before running the analysis.' 
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Minify for LLM token efficiency
+      const minifiedData = minifyCdrData(rawCdrProducts);
+      const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nAvailable Credit Cards (Minified PRD from CDR):\n${JSON.stringify(minifiedData, null, 2)}`;
 
       if (body.action === 'run_math') {
         const { income, monthlySpend, primaryGoal } = userProfile;
@@ -267,21 +250,35 @@ Be conservative: if in doubt, flag as a risk.`;
            });
         }
         
-        // Fetch and minify CDR Data again so the Synthesizer has access to the card names and image URLs
-        const minifiedData = await fetchCdrData();
+        // Re-minify CDR data so the Synthesizer has access to card names and image URLs
+        const minifiedData = minifyCdrData(Array.isArray(body.cdrProducts) ? body.cdrProducts : []);
         
-        const { primaryGoal, needs: extraNeeds } = body.userProfile || {};
+        const { primaryGoal, needs: rawExtraNeeds } = body.userProfile || {};
+        
+        // Sanitize free-text input to prevent prompt injection:
+        // Strip control characters, HTML tags, and excessive length
+        const sanitizePromptInput = (str, maxLen = 500) => {
+          if (typeof str !== 'string') return 'None';
+          return str
+            .replace(/[\u0000-\u001F\u007F]/g, '')  // strip control chars
+            .replace(/<[^>]*>/g, '')                  // strip any HTML tags
+            .slice(0, maxLen)                         // limit length
+            .trim() || 'None';
+        };
+        const safeExtraNeeds = sanitizePromptInput(rawExtraNeeds);
+        const safePrimaryGoal = sanitizePromptInput(primaryGoal, 100);
+        
         const synthesizerPrompt = `You are a senior financial product comparison editor. Synthesise the Math and Risk agent reports into a polished, easy-to-read recommendation.
 
 FORMATTING RULES:
 1. Start with exactly: '**⚠️ TECH DEMO DISCLAIMER:** This analysis is generated by AI for demonstration purposes only. It is not financial advice under ASIC RG 244.'
-2. Then output a brief 1-2 sentence summary of the user's primary goal: "${primaryGoal || 'general value'}"
+2. Then output a brief 1-2 sentence summary of the user's primary goal: "${safePrimaryGoal || 'general value'}"
 3. Show each card as a column in a Markdown comparison table with visible borders. Use the card's full brand + product name — never use internal IDs like CC-001.
 4. For each card header in the table, embed the card image using: ![Card Name](image_url)
 5. Include rows for: Eligibility Status, Annual Fee, Est. Annual Interest, Est. Reward Value, Net Annual Cost, Key Risks, Goal Alignment
 6. After the table, add a bold "🏆 Top Pick:" section naming the single best card and a 2-sentence plain-English reason why.
 7. End with a "⚠️ Data Gaps" section listing any information the user must verify directly with the issuer.`;
-        const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards PRD Context (includes image URLs):\n${JSON.stringify(minifiedData, null, 2)}\n\nUser's extra notes: ${extraNeeds || 'None'}\n\nPlease synthesise now.`;
+        const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards PRD Context (includes image URLs):\n${JSON.stringify(minifiedData, null, 2)}\n\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise now.`;
 
         const finalRecommendation = await callOpenRouter(env, 'google/gemini-2.5-flash', synthesizerPrompt, synthesizerUserMessage);
         

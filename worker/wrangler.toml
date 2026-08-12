@@ -1,0 +1,28 @@
+# ─── Worker: cdr-recommender ──────────────────────────────────────────────────
+# Wrangler configuration for the OpenCard-AU AI Recommendation Worker.
+# Deploy via: npm run deploy:worker (from repo root) or npx wrangler deploy (from /worker/)
+# Docs: https://developers.cloudflare.com/workers/wrangler/configuration/
+
+name = "cdr-recommender"
+main = "../worker.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Environment: Production ────────────────────────────────────────────────────
+# Secrets are NOT stored here — set them in the Cloudflare dashboard or via:
+#   npx wrangler secret put RECOMMENDATION_PASSCODE
+#   npx wrangler secret put OPENROUTER_API_KEY
+
+[env.production]
+name = "cdr-recommender"
+
+# ── Observability ──────────────────────────────────────────────────────────────
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+# ── Build ──────────────────────────────────────────────────────────────────────
+# worker.js uses ES Modules syntax (export default { fetch() {} })
+# No bundling step required — Cloudflare Workers natively supports ES Modules.
+[build]
+command = ""
