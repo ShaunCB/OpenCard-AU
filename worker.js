@@ -4,9 +4,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, x-passcode',
 };
 
-async function fetchBankData(url, env) {
+async function fetchBankData(url, env, xV = '5', xMinV = '1') {
   const cache = caches.default;
-  const cacheKey = new Request(url, { method: 'GET' });
+  const cacheKey = new Request(url, { method: 'GET', headers: { 'x-v': xV, 'x-min-v': xMinV } });
   let response = await cache.match(cacheKey);
   if (!response) {
     const controller = new AbortController();
@@ -14,10 +14,14 @@ async function fetchBankData(url, env) {
     try {
       response = await fetch(url, {
         method: 'GET',
-        headers: { 'x-v': '3' },
+        headers: { 'x-v': xV, 'x-min-v': xMinV },
         signal: controller.signal
       });
       clearTimeout(timeout);
+      
+      const respondedVersion = response.headers.get('x-v');
+      console.log(`[CDR API] Fetched ${url}. Target: v${xV}, Negotiated: v${respondedVersion}, Status: ${response.status}`);
+      
       if (response.ok) {
         const responseToCache = new Response(response.clone().body, response);
         responseToCache.headers.append("Cache-Control", "s-maxage=86400");
@@ -25,7 +29,7 @@ async function fetchBankData(url, env) {
       }
     } catch (e) {
       clearTimeout(timeout);
-      console.warn("Fetch timeout or error for:", url);
+      console.warn("Fetch timeout or error for:", url, e.message);
       return null;
     }
   }
@@ -157,7 +161,7 @@ export default {
 
         const fetchPromises = bankUrls.map(bankUrl => {
           const productsUrl = bankUrl.replace(/\/$/, '') + '/banking/products?product-category=CRED_AND_CHRG_CARDS';
-          return fetchBankData(productsUrl, env).then(res => {
+          return fetchBankData(productsUrl, env, '5', '1').then(res => {
             if (!res || !res.data || !res.data.products) return [];
             return res.data.products.map(p => ({ ...p, _bankUrl: bankUrl }));
           });
@@ -196,7 +200,7 @@ Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markd
 
         const fetchPromises = topProducts.map(tp => {
           const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/banking/products/' + encodeURIComponent(tp.id);
-          return fetchBankData(detailUrl, env).then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
+          return fetchBankData(detailUrl, env, '7', '1').then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
         });
         
         const detailResults = (await Promise.all(fetchPromises)).filter(p => p);
@@ -256,7 +260,7 @@ Be conservative: if in doubt, flag as a risk.`;
 
         const fetchPromises = topProducts.map(tp => {
           const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/banking/products/' + encodeURIComponent(tp.id);
-          return fetchBankData(detailUrl, env).then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
+          return fetchBankData(detailUrl, env, '7', '1').then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
         });
         const detailResults = (await Promise.all(fetchPromises)).filter(p => p);
         const minifiedData = minifyCdrData(detailResults);
