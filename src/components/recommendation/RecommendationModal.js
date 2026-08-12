@@ -331,6 +331,27 @@ const useStyles = makeStyles((theme) => ({
       marginTop: '8px',
       marginBottom: '8px'
     }
+  },
+  errorRoot: {
+    padding: theme.spacing(3),
+    backgroundColor: '#fef2f2',
+    border: '1px solid #f87171',
+    borderRadius: '8px',
+    marginTop: theme.spacing(2),
+    '@media (prefers-color-scheme: dark)': {
+      backgroundColor: '#450a0a',
+      borderColor: '#b91c1c',
+    }
+  },
+  errorBlock: {
+    backgroundColor: '#1e293b',
+    color: '#f1f5f9',
+    padding: theme.spacing(1.5),
+    borderRadius: '4px',
+    overflowX: 'auto',
+    fontSize: '0.8rem',
+    marginTop: theme.spacing(1),
+    marginBottom: theme.spacing(2),
   }
 }));
 
@@ -452,7 +473,12 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
       if (!response.ok) throw new Error(data.error || 'Failed to verify passcode.');
       setIsAuthenticated(true);
     } catch (err) {
-      setError(err.message);
+      console.error('[Credit Card Recommender Debug]: Auth Error', err);
+      setError({
+        name: err.name,
+        message: err.message,
+        stack: err.stack
+      });
     } finally {
       setLoading(false);
     }
@@ -478,12 +504,37 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
       };
 
       const fetchAgent = async (action, bodyData = {}) => {
-        const res = await fetch(WORKER_URL, {
-          ...baseReq,
-          body: JSON.stringify({ action, profile, ...bodyData }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.details || data.error || `Failed on ${action}`);
+        let res;
+        try {
+          res = await fetch(WORKER_URL, {
+            ...baseReq,
+            body: JSON.stringify({ action, profile, ...bodyData }),
+          });
+        } catch (fetchErr) {
+          console.error('[Credit Card Recommender Debug]: Network/CORS Error', fetchErr);
+          throw fetchErr;
+        }
+        
+        const textPayload = await res.text();
+        let data;
+        try {
+          data = JSON.parse(textPayload);
+        } catch (parseErr) {
+          console.error('[Credit Card Recommender Debug]: JSON Parse Error', parseErr);
+          const e = new Error('Invalid JSON response from server');
+          e.status = res.status;
+          e.payload = textPayload;
+          e.stack = parseErr.stack;
+          throw e;
+        }
+        
+        if (!res.ok) {
+          const err = new Error(data.details || data.error || `Failed on ${action}`);
+          err.status = res.status;
+          err.payload = textPayload;
+          console.error('[Credit Card Recommender Debug]: API Error', err);
+          throw err;
+        }
         return data;
       };
 
@@ -530,11 +581,19 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
         const cleaned = synthData.recommendation.replace(/```json/gi, '').replace(/```/g, '').trim();
         setRecommendation(JSON.parse(cleaned));
       } catch (e) {
+        console.error('[Credit Card Recommender Debug]: JSON Parse Recommendation Error', e);
         throw new Error("Failed to parse AI recommendation. Please try again.");
       }
     } catch (err) {
+      console.error('[Credit Card Recommender Debug]: Pipeline Error', err);
       stopTaglines();
-      setError(err.message);
+      setError({
+        name: err.name,
+        message: err.message,
+        status: err.status,
+        payload: err.payload,
+        stack: err.stack
+      });
     } finally {
       setLoading(false);
     }
@@ -620,7 +679,7 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
             )}
 
             {/* ── Profile form (post-auth, pre-loading) ─────────────────── */}
-            {isAuthenticated && !loading && (
+            {isAuthenticated && !loading && !error && (
               <>
                 <Typography variant="body1" gutterBottom>
                   Tell us about yourself so our AI agents can find the right card for you.
@@ -718,9 +777,58 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
 
             {/* Error message */}
             {error && (
-              <Typography color="error" variant="body2" role="alert" style={{ marginTop: 8 }}>
-                {error}
-              </Typography>
+              <div className={classes.errorRoot} role="alert">
+                <Typography variant="h6" color="error" style={{ marginBottom: 8 }}>
+                  Analysis Failed
+                </Typography>
+                <Typography variant="body1">
+                  <strong>Error:</strong> {error.name}: {error.message}
+                </Typography>
+                {error.status && (
+                  <Typography variant="body2">
+                    <strong>HTTP Status:</strong> {error.status}
+                  </Typography>
+                )}
+                {error.payload && (
+                  <>
+                    <Typography variant="body2" style={{ marginTop: 12 }}>
+                      <strong>Raw Response:</strong>
+                    </Typography>
+                    <pre className={classes.errorBlock}>{error.payload}</pre>
+                  </>
+                )}
+                {error.stack && (
+                  <>
+                    <Typography variant="body2" style={{ marginTop: 12 }}>
+                      <strong>Stack Trace:</strong>
+                    </Typography>
+                    <pre className={classes.errorBlock}>{error.stack}</pre>
+                  </>
+                )}
+                <div style={{ marginTop: 16 }}>
+                  <Button 
+                    onClick={() => { setError(null); handleAnalyze(); }} 
+                    variant="contained" 
+                    color="primary" 
+                    style={{ marginRight: 8 }}
+                  >
+                    Try Again
+                  </Button>
+                  <Button 
+                    onClick={() => navigator.clipboard.writeText(JSON.stringify(error, null, 2))} 
+                    variant="outlined"
+                    style={{ marginRight: 8 }}
+                  >
+                    Copy Error Details
+                  </Button>
+                  <Button 
+                    onClick={() => { setError(null); resetAgentStatus(); }} 
+                    variant="text"
+                  >
+                    Go Back
+                  </Button>
+                </div>
+              </div>
             )}
           </>
         ) : (
