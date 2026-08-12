@@ -10,6 +10,7 @@ import AppBar from '@material-ui/core/AppBar'
 import Tabs from '@material-ui/core/Tabs'
 import Tab from '@material-ui/core/Tab'
 import DiscoveryInfo from './data/discovery/DiscoveryInfo'
+import RecommendationModal from './recommendation/RecommendationModal'
 
 const useStyles = makeStyles(theme => ({
   hidden: {
@@ -19,10 +20,21 @@ const useStyles = makeStyles(theme => ({
   
 function Page() {
   const [value, setValue] = React.useState(0)
+  const [modalOpen, setModalOpen] = React.useState(false)
+  const [clickCount, setClickCount] = React.useState(0)
   const classes = useStyles()
 
   const handleChange = (event, newValue) => {
     setValue(newValue);
+  };
+
+  const handleSecretClick = () => {
+    const newCount = clickCount + 1;
+    setClickCount(newCount);
+    if (newCount >= 3) {
+      setModalOpen(true);
+      setClickCount(0);
+    }
   };
   
   return (
@@ -50,9 +62,13 @@ function Page() {
       
       {/* Global Footer (Mandatory positioning) */}
       <div style={{ textAlign: 'center', color: '#64748b', fontSize: '0.9rem', padding: '32px 0' }}>
-        A Technical Showcase of CDR Product Data.<br/>
+        <span onClick={handleSecretClick} style={{ cursor: 'default', userSelect: 'none' }}>
+          A Technical Showcase of CDR Product Data.<br/>
+        </span>
         <span style={{ fontSize: '0.8rem' }}>This tool provides general information only and does not constitute financial advice.</span>
       </div>
+      
+      <RecommendationModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </Container>
   );
 }
