@@ -33,6 +33,14 @@ const PARALLEL_TAGLINES = [
 // Agent definitions — each maps to a real API action and carries consumer-facing copy.
 const AGENT_DEFINITIONS = [
   {
+    id: 'pre',
+    action: 'run_prescreen',
+    label: 'Pre-Screener',
+    description: 'Filtering all available market cards...',
+    model: 'Gemini 2.5 Flash',
+    icon: '🔍',
+  },
+  {
     id: 'math',
     action: 'run_math',
     label: 'Value & Cost Analyst',
@@ -391,6 +399,7 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
 
   // Multi-agent progress: map of agentId → STATUS value
   const [agentStatus, setAgentStatus] = useState({
+    pre: STATUS.IDLE,
     math: STATUS.IDLE,
     risk: STATUS.IDLE,
     synth: STATUS.IDLE,
@@ -424,7 +433,7 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
     setAgentStatus(prev => ({ ...prev, [id]: status }));
 
   const resetAgentStatus = () =>
-    setAgentStatus({ math: STATUS.IDLE, risk: STATUS.IDLE, synth: STATUS.IDLE });
+    setAgentStatus({ pre: STATUS.IDLE, math: STATUS.IDLE, risk: STATUS.IDLE, synth: STATUS.IDLE });
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   const handleLogin = async () => {
@@ -475,17 +484,24 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
         return data;
       };
 
-      // Phase 1: parallel agents — mark both as thinking, start tagline cycle
+      // Phase 1: Pre-Screener
+      setAgent('pre', STATUS.THINKING);
+      startTaglineCycle('parallel');
+      
+      const prescreenData = await fetchAgent('run_prescreen');
+      const topProductIds = prescreenData.topProductIds;
+      setAgent('pre', STATUS.DONE);
+
+      // Phase 2: parallel agents — mark both as thinking
       setAgent('math', STATUS.THINKING);
       setAgent('risk', STATUS.THINKING);
-      startTaglineCycle('parallel');
 
       // Wrap each promise so we can update agent status as they individually resolve/reject
-      const mathPromise = fetchAgent('run_math').then(
+      const mathPromise = fetchAgent('run_math', { topProductIds }).then(
         data  => { setAgent('math', STATUS.DONE);  return data; },
         err   => { setAgent('math', STATUS.ERROR); throw err; }
       );
-      const riskPromise = fetchAgent('run_risk').then(
+      const riskPromise = fetchAgent('run_risk', { topProductIds }).then(
         data  => { setAgent('risk', STATUS.DONE);  return data; },
         err   => { setAgent('risk', STATUS.ERROR); throw err; }
       );
@@ -703,7 +719,8 @@ function RecommendationModal({ open, onClose, cdrProducts }) {
                 marked(recommendation.replace(
                   /https:\/\/shauncb\.github\.io\/OpenCard-AU\/images\//g,
                   import.meta.env.BASE_URL + 'images/'
-                ))
+                )),
+                { ADD_TAGS: ['abbr'], ADD_ATTR: ['title'] }
               )
             }}
           />

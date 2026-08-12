@@ -206,8 +206,33 @@ export default {
       }
 
       // Minify for LLM token efficiency
-      const minifiedData = minifyCdrData(rawCdrProducts);
+      let minifiedData = minifyCdrData(rawCdrProducts);
+      if (Array.isArray(body.topProductIds) && body.topProductIds.length > 0) {
+        minifiedData = minifiedData.filter(p => body.topProductIds.includes(p.id));
+      }
       const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nAvailable Credit Cards (Minified PRD from CDR):\n${JSON.stringify(minifiedData, null, 2)}`;
+
+      if (body.action === 'run_prescreen') {
+        const prescreenPrompt = `You are a high-speed AI screener. Review the user's profile and the full catalog of credit & charge cards provided in the JSON data.
+Filter the list and select the Top 5 most relevant product IDs for this user based on their primary goal, income, and spend.
+Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markdown formatting, backticks, or any explanation. Example: ["CC-01", "CC-02"]`;
+        const prescreenAnalysis = await callOpenRouter(env, 'google/gemini-2.5-flash', prescreenPrompt, dataContext);
+        
+        let topProductIds = [];
+        try {
+          const jsonMatch = prescreenAnalysis.match(/\[.*\]/s);
+          const jsonStr = jsonMatch ? jsonMatch[0] : prescreenAnalysis;
+          topProductIds = JSON.parse(jsonStr);
+        } catch (e) {
+          console.error("Prescreen parse error", e, prescreenAnalysis);
+          topProductIds = minifiedData.slice(0, 5).map(p => p.id);
+        }
+        
+        return new Response(JSON.stringify({ success: true, topProductIds }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
 
       if (body.action === 'run_math') {
         const { income, monthlySpend, primaryGoal } = userProfile;
@@ -220,12 +245,13 @@ User Data:
 
 For each card, output:
 1. Annual Fee
-2. Estimated Annual Interest (monthlySpend * 0.3 * 12 * purchase_rate)
-3. Estimated Reward Value (calculate from spend and program details if available)
-4. Net Annual Cost (fees + interest - rewards value)
-5. Goal Alignment score (1-5) for the stated Primary Goal
+2. Annual Fee
+3. Estimated Interest/Fees: If it is a Credit Card, calculate (monthlySpend * 0.3 * 12 * purchase_rate). If it is a Charge Card, explicitly state "$0 (Charge Card - balance paid in full)" and note any late/statement fees instead. Include a brief explanation for the calculation.
+4. Estimated Reward Value: Calculate from spend and program details if available. Include a brief explanation for the calculation.
+5. Net Annual Cost: (fees + interest - rewards value)
+6. Goal Alignment score (1-5) for the stated Primary Goal
 
-Be precise with numbers. Do not round. Output structured reasoning.`;
+Be precise with numbers. Do not round. Output structured reasoning. Note whether each card is a Credit Card or Charge Card.`;
         const mathAnalysis = await callOpenRouter(env, 'deepseek/deepseek-chat', mathAgentPrompt, dataContext);
         return new Response(JSON.stringify({ success: true, result: mathAnalysis }), {
           status: 200,
@@ -291,8 +317,10 @@ FORMATTING RULES:
 3. Show each card as a column in a Markdown comparison table with visible borders. Use the card's full brand + product name — never use internal IDs like CC-001.
 4. For each card header in the table, embed the card image using: ![Card Name](image_url)
 5. Include rows for: Eligibility Status, Annual Fee, Est. Annual Interest, Est. Reward Value, Net Annual Cost, Key Risks, Goal Alignment
-6. After the table, add a bold "🏆 Top Pick:" section naming the single best card and a 2-sentence plain-English reason why.
-7. End with a "⚠️ Data Gaps" section listing any information the user must verify directly with the issuer.`;
+   - IMPORTANT: If a card is a Charge Card, replace the 'Est. Annual Interest' value with 'N/A (Charge Card)'.
+6. Add Tooltips: For EVERY cell value in the 'Est. Annual Interest' and 'Est. Reward Value' rows, wrap the value in an HTML <abbr> tag containing a brief explanation of how that specific card's value was calculated (e.g., <abbr title="Calculated as $2500 * 30% * 12 * 19.99%">$179.91</abbr> or <abbr title="Charge cards do not accrue APR interest">N/A</abbr>).
+7. After the table, add a bold "🏆 Top Pick:" section naming the single best card and a 2-sentence plain-English reason why.
+8. End with a "⚠️ Data Gaps" section listing any information the user must verify directly with the issuer.`;
         const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards PRD Context (includes image URLs):\n${JSON.stringify(minifiedData, null, 2)}\n\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise now.`;
 
         const finalRecommendation = await callOpenRouter(env, 'google/gemini-2.5-flash', synthesizerPrompt, synthesizerUserMessage);
