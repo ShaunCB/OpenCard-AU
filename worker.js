@@ -360,9 +360,19 @@ CRITICAL INSTRUCTIONS:
 4. estNetAnnualCost.numValue must be a raw number representing the financial cost (e.g., if the user makes a net profit of $150, numValue is -150).
 5. DO NOT invent or hallucinate the user's goal. State their goal strictly based on their provided profile.`;
 
-        const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards PRD Context:\n${JSON.stringify(minifiedData, null, 2)}\n\nUser's stated primary goal: ${primaryGoal}\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
+        // OPTIMIZATION: Strip out massive arrays (features, fees, rates) from the PRD context.
+        // The Math/Risk agents already analyzed them; Synth only needs the metadata to format the final JSON output.
+        const synthMetadata = minifiedData.map(c => ({
+          id: c.id,
+          name: c.name,
+          brand: c.brand,
+          image: c.image,
+          applicationUri: c.applicationUri
+        }));
 
-        const finalRecommendation = await callOpenRouter(env, 'openai/gpt-oss-20b', synthesizerPrompt, synthesizerUserMessage);
+        const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards Metadata:\n${JSON.stringify(synthMetadata, null, 2)}\n\nUser's stated primary goal: ${primaryGoal}\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
+
+        const finalRecommendation = await callOpenRouter(env, 'deepseek/deepseek-v4-flash', synthesizerPrompt, synthesizerUserMessage);
         
         return new Response(JSON.stringify({ success: true, recommendation: finalRecommendation }), { status: 200, headers: corsHeaders });
       }
