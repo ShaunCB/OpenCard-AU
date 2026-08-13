@@ -92,6 +92,7 @@ export default {
         const cats = Array.isArray(topCategories) ? topCategories.join(', ') : 'None specified';
         
         const systemPrompt = `You are an expert Consumer Data Right (CDR) Credit Card Recommender. Your goal is to analyze the provided user financial profile against the provided JSON array of available credit card products and output a synthesized, highly accurate recommendation.
+CRITICAL: You MUST output all text, explanations, and JSON values entirely in English.
 
 Execute the following logical steps internally before returning your output:
 1. PRE-SCREENING: Filter out any cards in the CDR data where the user does not meet the minimum income, age, or residency eligibility criteria.
