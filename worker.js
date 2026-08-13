@@ -224,16 +224,18 @@ export default {
         const minifiedData = minifyCdrData(rawCdrProducts);
         
         const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nAvailable Credit Cards:\n${JSON.stringify(minifiedData, null, 2)}`;
-        const prescreenPrompt = `You are a high-speed AI screener. Review the user's profile and the full catalog of credit & charge cards provided in the JSON data.
-Filter the list and select the Top 5 most relevant product IDs for this user based on their primary goal, income, and spend.
-Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markdown formatting, backticks, or any explanation. Example of the output format: ["exact-id-1", "exact-id-2"]. You MUST strictly use the exact string values from the "id" fields in the provided JSON data. Do not hallucinate or use fake IDs.`;
+        const prescreenPrompt = `You are a high-speed AI screener. Filter the provided credit/charge cards based on the user's profile.
+Return ONLY a raw JSON array of the top 5 most relevant products. Format strictly as:
+[{"card_id": "exact-id-1", "matched_perks": ["perk1", "perk2"]}]
+No markdown, no explanation, no prose. Use exact "id" strings.`;
         
-        const prescreenAnalysis = await callOpenRouter(env, 'moonshotai/kimi-k2.7-code', prescreenPrompt, dataContext);
+        const prescreenAnalysis = await callOpenRouter(env, 'deepseek/deepseek-chat', prescreenPrompt, dataContext);
         
         let topProductIds = [];
         try {
           const jsonMatch = prescreenAnalysis.match(/\[.*?\]/s);
-          topProductIds = JSON.parse(jsonMatch ? jsonMatch[0] : prescreenAnalysis);
+          const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : prescreenAnalysis);
+          topProductIds = parsed.map(item => typeof item === 'string' ? item : item.card_id);
         } catch (e) {
           topProductIds = minifiedData.slice(0, 5).map(p => p.id);
         }
@@ -244,7 +246,6 @@ Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markd
 
         if (topProducts.length === 0) {
           console.error("Worker Diagnostic: LLM returned no valid IDs.", { prescreenAnalysis, topProductIds });
-          // Graceful fallback: use first 5 products directly instead of failing hard
           const fallbackProducts = minifiedData.slice(0, 5).map(p => ({ id: p.id, bankUrl: p._bankUrl }));
           return new Response(JSON.stringify({ success: true, topProducts: fallbackProducts, failedBanks, warning: 'Pre-screener fallback used.' }), { status: 200, headers: corsHeaders });
         }
@@ -269,42 +270,26 @@ Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markd
         const { income, monthlySpend, primaryGoal, age, needs: rawExtraNeeds } = userProfile;
         const safeExtraNeeds = sanitizePromptInput(rawExtraNeeds);
 
-        const mathAgentPrompt = `You are a quantitative financial analyst. Using the user's EXACT financial data below, calculate the true annual cost and value for each credit/charge card in the PRD.
-User Data:
-- Annual Income: $${income || 'Unknown'}
-- Monthly Spend: $${monthlySpend || 'Unknown'} (assume 30% is carried as revolving balance for interest calc if it is a credit card)
-- Primary Goal: ${primaryGoal || 'Not specified'}
-- Extra Needs: ${safeExtraNeeds || 'None'}
+        const mathAgentPrompt = `You are a Value & Cost Analyst. Calculate true annual cost/value for each card.
+Formula: Net Annual Cost = (Annual Fee + Est Interest) - Est Reward Value
+Interest: (Monthly Spend * 0.30 * 12 * Purchase Rate). For Charge Cards, Interest = 0.
+Return ONLY a raw JSON object mapped by card_id. No prose, no CoT.
+Format:
+{
+  "card_id": { "cardType": "Credit Card", "annualFee": 150, "estInterest": 0, "estRewardValue": 50, "netAnnualCost": 100, "goalAlignmentScore": 4 }
+}`;
 
-For each card, output:
-1. Card Type: State whether it is a "Credit Card" or "Charge Card" (check descriptions and features).
-2. Annual Fee
-3. Estimated Interest/Fees: If it is a Credit Card, calculate (monthlySpend * 0.3 * 12 * purchase_rate). If it is a Charge Card, explicitly state "$0 (Charge Card - balance paid in full)" and note any late/statement fees instead. Include a brief explanation for the calculation.
-   - CRITICAL RULE: DO NOT assume or calculate avoidable fees (like late fees, foreign transaction fees, or cash advance fees) unless the user's "Extra Needs" explicitly states an intention to incur them.
-4. Estimated Reward Value: Calculate from spend and program details if available. Include a brief explanation for the calculation.
-5. Est. Net Annual Cost: Calculate strictly as (Annual Fee + Estimated Interest) - Estimated Reward Value. Output the value and a brief explanation for the calculation.
-6. Goal Alignment score (1-5) for the stated Primary Goal
-
-Be precise with numbers. Do not round. Output structured reasoning. Note whether each card is a Credit Card or Charge Card.`;
-
-        const riskAgentPrompt = `You are an Australian consumer credit compliance expert. Check every eligibility criterion in the PRD against the user's profile and flag any issue.
-User Data:
-- Age: ${age || 'Unknown'}
-- Annual Income: $${income || 'Unknown'}
-- Primary Goal: ${primaryGoal || 'Not specified'}
-
-For each card, output a risk assessment:
-- ELIGIBLE / INELIGIBLE / VERIFICATION REQUIRED (if data like residency or exact income is missing, flag as VERIFICATION REQUIRED and state the reason)
-- List each eligibility criterion and whether the user passes or fails
-- Flag any hidden risks: revert rates after promotional periods, balance transfer fees, missing interest-free period data
-- If critical data is absent from the PRD, explicitly state 'DATA GAP — verify with issuer'
-
-Be conservative: if in doubt, flag as a risk.`;
+        const riskAgentPrompt = `You are an Eligibility Checker. Perform strict boolean evaluation on eligibility criteria.
+Return ONLY a raw JSON object mapped by card_id. No prose.
+Format:
+{
+  "card_id": { "eligible": true, "failedCriteria": [], "hiddenRisks": ["high revert rate"] }
+}`;
 
         // Execute Agent 2 and Agent 3 CONCURRENTLY using Promise.all()
         const [mathAnalysis, riskAnalysis] = await Promise.all([
-          callOpenRouter(env, 'deepseek/deepseek-v4-pro', mathAgentPrompt, dataContext),
-          callOpenRouter(env, 'deepseek/deepseek-v4-flash', riskAgentPrompt, dataContext)
+          callOpenRouter(env, 'deepseek/deepseek-chat', mathAgentPrompt, dataContext),
+          callOpenRouter(env, 'deepseek/deepseek-chat', riskAgentPrompt, dataContext)
         ]);
 
         return new Response(JSON.stringify({ success: true, mathAnalysis, riskAnalysis }), { status: 200, headers: corsHeaders });
@@ -327,41 +312,32 @@ Be conservative: if in doubt, flag as a risk.`;
         const primaryGoal = userProfile.primaryGoal || 'Not specified';
         const safeExtraNeeds = sanitizePromptInput(userProfile.needs);
         
-        const synthesizerPrompt = `You are a senior financial product comparison editor. Synthesise the Math and Risk agent reports into a strict JSON object. DO NOT output markdown, code blocks, or any other text. Output ONLY valid JSON.
+        const synthesizerPrompt = `You are the Recommendation Editor. Synthesise the structured Math and Risk outputs into the final JSON format. DO NOT output markdown, prose, or anything other than valid JSON.
 
 JSON SCHEMA:
 {
-  "goalSummary": "1-2 sentence summary of user's primary goal (MUST accurately reflect the user's primaryGoal and extra notes. DO NOT hallucinate details like 'Qantas' or specific brands if the user only mentioned general rewards/travel).",
-  "verificationChecklist": ["item 1", "item 2", "..."], // Consolidate all generic data gaps/global verification requirements here. Empty array if none.
+  "goalSummary": "1-2 sentence summary of user's primary goal",
+  "verificationChecklist": ["item 1", "item 2", "..."],
   "cards": [
     {
       "name": "Full product name",
       "brand": "Brand name",
       "image": "image url or null",
       "applicationUri": "application url or null",
-      "eligibility": "Eligibility status (e.g. 'Verification Required (Reason)')",
+      "eligibility": "Eligibility status",
       "annualFee": "Annual fee string",
-      "estAnnualInterest": { "display": "Value string", "explanation": "Brief explanation of calculation" }, // set to null if Charge Card
-      "avoidableFees": { "display": "Value string", "explanation": "Brief explanation of avoidable fees" }, // omit if Credit Card, include only if Charge Card
+      "estAnnualInterest": { "display": "Value string", "explanation": "Brief explanation" },
+      "avoidableFees": { "display": "Value string", "explanation": "Brief explanation" },
       "estRewardValue": { "display": "Value string", "explanation": "Brief explanation" },
-      "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Brief explanation. numValue must be a number representing the cost (negative for profit/gain, positive for cost)" },
-      "keyRisks": ["High revert rate", "Risk 2"], // Concise high-priority risks not in global checklist
+      "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Brief explanation" },
+      "keyRisks": ["Risk 1", "Risk 2"],
       "goalAlignment": "X/5"
     }
   ],
   "topPickReason": "2-sentence reason naming the best card",
-  "dataGaps": ["gap 1"] // Any remaining data gaps
-}
+  "dataGaps": ["gap 1"]
+}`;
 
-CRITICAL INSTRUCTIONS:
-1. Ensure the JSON is perfectly formatted.
-2. The cards array MUST contain an object for EVERY card analyzed.
-3. For keyRisks, use concise strings without bullet points or emojis (the UI will add the 🔺).
-4. estNetAnnualCost.numValue must be a raw number representing the financial cost (e.g., if the user makes a net profit of $150, numValue is -150).
-5. DO NOT invent or hallucinate the user's goal. State their goal strictly based on their provided profile.`;
-
-        // OPTIMIZATION: Strip out massive arrays (features, fees, rates) from the PRD context.
-        // The Math/Risk agents already analyzed them; Synth only needs the metadata to format the final JSON output.
         const synthMetadata = minifiedData.map(c => ({
           id: c.id,
           name: c.name,
@@ -372,7 +348,7 @@ CRITICAL INSTRUCTIONS:
 
         const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards Metadata:\n${JSON.stringify(synthMetadata, null, 2)}\n\nUser's stated primary goal: ${primaryGoal}\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
 
-        const finalRecommendation = await callOpenRouter(env, 'deepseek/deepseek-v4-flash', synthesizerPrompt, synthesizerUserMessage);
+        const finalRecommendation = await callOpenRouter(env, 'deepseek/deepseek-chat', synthesizerPrompt, synthesizerUserMessage);
         
         return new Response(JSON.stringify({ success: true, recommendation: finalRecommendation }), { status: 200, headers: corsHeaders });
       }

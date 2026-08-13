@@ -45,7 +45,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_math',
     label: 'Value & Cost Analyst',
     description: 'Calculating fees, interest & estimated rewards return',
-    model: 'DEEPSEEK V4 PRO (1.6T REASONING)',
+    model: 'DEEPSEEK V4 FLASH',
     icon: '💰',
   },
   {
@@ -504,38 +504,58 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
       };
 
       const fetchAgent = async (action, bodyData = {}) => {
-        let res;
-        try {
-          res = await fetch(WORKER_URL, {
-            ...baseReq,
-            body: JSON.stringify({ action, profile, ...bodyData }),
-          });
-        } catch (fetchErr) {
-          console.error('[Credit Card Recommender Debug]: Network/CORS Error', fetchErr);
-          throw fetchErr;
-        }
+        const MAX_RETRIES = 2;
+        let attempt = 0;
         
-        const textPayload = await res.text();
-        let data;
-        try {
-          data = JSON.parse(textPayload);
-        } catch (parseErr) {
-          console.error('[Credit Card Recommender Debug]: JSON Parse Error', parseErr);
-          const e = new Error('Invalid JSON response from server');
-          e.status = res.status;
-          e.payload = textPayload;
-          e.stack = parseErr.stack;
-          throw e;
+        while (attempt <= MAX_RETRIES) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s timeout per request
+            
+            const res = await fetch(WORKER_URL, {
+              ...baseReq,
+              body: JSON.stringify({ action, profile, ...bodyData }),
+              signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
+            const textPayload = await res.text();
+            let data;
+            try {
+              data = JSON.parse(textPayload);
+            } catch (parseErr) {
+              console.error('[Credit Card Recommender Debug]: JSON Parse Error', parseErr);
+              const e = new Error('Invalid JSON response from server');
+              e.status = res.status;
+              e.payload = textPayload;
+              e.stack = parseErr.stack;
+              throw e;
+            }
+            
+            if (!res.ok) {
+              const err = new Error(data.details || data.error || `Failed on ${action}`);
+              err.status = res.status;
+              err.payload = textPayload;
+              console.error('[Credit Card Recommender Debug]: API Error', err);
+              throw err;
+            }
+            return data;
+          } catch (err) {
+            if (err.name === 'AbortError') {
+              console.error(`[Credit Card Recommender Debug]: Request timeout on ${action} (attempt ${attempt + 1})`);
+            } else {
+              console.error(`[Credit Card Recommender Debug]: Network/CORS Error on ${action} (attempt ${attempt + 1})`, err);
+            }
+            
+            if (attempt >= MAX_RETRIES) {
+              throw new Error(`Connection to AI server dropped or timed out after ${MAX_RETRIES + 1} attempts. Please try again.`);
+            }
+            
+            attempt++;
+            // Exponential backoff: 1.5s, then 3s
+            await new Promise(resolve => setTimeout(resolve, attempt * 1500));
+          }
         }
-        
-        if (!res.ok) {
-          const err = new Error(data.details || data.error || `Failed on ${action}`);
-          err.status = res.status;
-          err.payload = textPayload;
-          console.error('[Credit Card Recommender Debug]: API Error', err);
-          throw err;
-        }
-        return data;
       };
 
       // Phase 1: Pre-Screener — worker will use DEFAULT_BANK_URLS if no banking URLs provided
