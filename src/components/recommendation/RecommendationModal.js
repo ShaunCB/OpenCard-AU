@@ -532,7 +532,7 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
         while (attempt <= MAX_RETRIES) {
           try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s timeout per request
+            const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout for monolithic LLM
             
             const res = await fetch(WORKER_URL, {
               ...baseReq,
