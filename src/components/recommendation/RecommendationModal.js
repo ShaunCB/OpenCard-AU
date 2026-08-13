@@ -540,7 +540,7 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     while (attempt <= MAX_RETRIES) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 90000);
+        const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
         
         const res = await fetch(WORKER_URL, {
           ...baseReq,
@@ -601,7 +601,12 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
 
       setAgent('analysis', STATUS.THINKING);
       
-      let finalCdrData = minifyCdrData(cdrProducts);
+      const profileFilter = {
+        income: parseIntSafe(income, 100000),
+        age: parseIntSafe(age, 30)
+      };
+      
+      let finalCdrData = minifyCdrData(cdrProducts, profileFilter);
       
       if (!finalCdrData || finalCdrData.length === 0) {
         const err = new Error("No eligible credit cards were found in the provided data sources. Please try adding different banks.");
@@ -1206,61 +1211,71 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
 }
 
 // ─── Data Minification ────────────────────────────────────────────────────────
-function minifyCdrData(prdArray) {
+function minifyCdrData(prdArray, userProfile = {}) {
   if (!Array.isArray(prdArray)) return [];
   const CARD_CATEGORIES = ['CRED_AND_CHRG_CARDS', 'BUSINESS_CARDS', 'CORPORATE_CARDS'];
   const cardProducts = prdArray.filter(p => p && CARD_CATEGORIES.includes(p.productCategory));
 
-  return cardProducts.map(product => {
-    const cardArtEntry = Array.isArray(product.cardArt) ? product.cardArt.find(a => a && a.imageUri) : null;
+  const validProducts = [];
+
+  for (const product of cardProducts) {
+    // 1. Deterministic Pre-Filtering
+    let skip = false;
+    if (product.eligibility) {
+      for (const e of product.eligibility) {
+        if (e.eligibilityType === 'MIN_AGE' && e.additionalValue) {
+          const minAge = parseInt(e.additionalValue, 10);
+          if (!isNaN(minAge) && userProfile.age && userProfile.age < minAge) skip = true;
+        }
+        if (e.eligibilityType === 'MIN_INCOME' && e.additionalValue) {
+          const minIncome = parseInt(e.additionalValue, 10);
+          if (!isNaN(minIncome) && userProfile.income && userProfile.income < minIncome) skip = true;
+        }
+      }
+    }
+    if (skip) continue;
+
+    // 2. Aggressive Token Compression
     const minified = {
       id: product.productId,
       name: product.name,
       brand: product.brand || product.brandName,
-      isTailored: product.isTailored,
-      image: cardArtEntry ? cardArtEntry.imageUri : null,
-      applicationUri: product.applicationUri || null,
-      _bankUrl: product._bankUrl,
       features: [],
       fees: [],
       rates: [],
-      eligibility: []
+      elig: []
     };
+
+    const truncate = (str, len) => (str && str.length > len) ? str.substring(0, len) + '...' : (str || '');
 
     if (product.features) {
       minified.features = product.features
         .filter(f => f && f.featureType !== 'OTHER' && f.featureType !== 'DIGITAL_BANKING')
-        .map(f => ({ type: f.featureType, info: f.additionalInfo }));
+        .map(f => `${f.featureType}: ${truncate(f.additionalInfo, 100)}`.trim());
     }
+    
     if (product.fees) {
-      minified.fees = product.fees.filter(f => f).map(f => ({
-        type: f.feeType,
-        amount: f.amount != null ? f.amount : (f.fixedAmount?.amount ?? null),
-        name: f.name
-      }));
+      minified.fees = product.fees.filter(f => f).map(f => {
+        const amt = f.amount != null ? f.amount : (f.fixedAmount?.amount ?? null);
+        return `${f.feeType}: $${amt} (${f.name || ''})`.trim();
+      });
     }
+    
     if (product.lendingRates) {
-      minified.rates = product.lendingRates.filter(r => r).map(r => ({
-        type: r.lendingRateType,
-        rate: r.rate,
-        name: r.name
-      }));
+      minified.rates = product.lendingRates.filter(r => r).map(r => `${r.lendingRateType}: ${r.rate}%`.trim());
     }
+    
     if (product.eligibility) {
-      minified.eligibility = product.eligibility.filter(e => e).map(e => ({
-        type: e.eligibilityType,
-        info: e.additionalInfo,
-        value: e.additionalValue
-      }));
+      minified.elig = product.eligibility.filter(e => e).map(e => `${e.eligibilityType}: ${e.additionalValue || ''} ${truncate(e.additionalInfo, 100)}`.trim());
     }
 
     Object.keys(minified).forEach(key => {
       if (Array.isArray(minified[key]) && minified[key].length === 0) delete minified[key];
-      if (minified[key] === null || minified[key] === undefined) delete minified[key];
     });
 
-    return minified;
-  });
+    validProducts.push(minified);
+  }
+  return validProducts;
 }
 
 // ─── URL resolution (unchanged) ───────────────────────────────────────────────
