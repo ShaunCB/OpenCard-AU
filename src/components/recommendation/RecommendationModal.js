@@ -363,7 +363,26 @@ const useStyles = makeStyles((theme) => ({
       borderColor: '#334155',
       color: '#f8fafc',
     },
-  }
+  },
+  decisionMatrixRoot: {
+    marginTop: '12px',
+    padding: '8px',
+    backgroundColor: '#f8fafc',
+    borderRadius: '4px',
+    fontSize: '0.85rem',
+    '@media (prefers-color-scheme: dark)': {
+      backgroundColor: 'rgba(30, 41, 59, 0.9)',
+      color: '#e2e8f0',
+    },
+  },
+  decisionMatrixSummary: {
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    color: '#334155',
+    '@media (prefers-color-scheme: dark)': {
+      color: '#f8fafc',
+    },
+  },
 }));
 
 // ─── AgentProgressRow sub-component ──────────────────────────────────────────
@@ -1035,9 +1054,9 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
                   </div>
 
                   {card.decisionMatrix && (
-                    <div style={{ marginTop: '12px', padding: '8px', backgroundColor: '#f8fafc', borderRadius: '4px', fontSize: '0.85rem' }}>
+                    <div className={classes.decisionMatrixRoot}>
                       <details>
-                        <summary style={{ cursor: 'pointer', fontWeight: 'bold', color: '#334155' }}>🧠 AI Decision Matrix</summary>
+                        <summary className={classes.decisionMatrixSummary}>🧠 AI Decision Matrix</summary>
                         <div style={{ marginTop: '8px' }}>
                           <strong>Inclusion Steps:</strong>
                           <ul style={{ paddingLeft: '16px', margin: '4px 0' }}>

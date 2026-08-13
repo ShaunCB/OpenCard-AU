@@ -103,7 +103,7 @@ Execute the following logical steps internally before returning your output:
      - Flexible Bank Reward Points (e.g., Amex MR, CBA Awards, NAB Rewards): $0.005 AUD per point.
    - Calculate Est. Net Annual Cost using this exact formula: Annual Fee - (Total Points * Point Value) + Estimated Annual Interest.
 3. RISK ASSESSMENT: Flag any hidden risks (e.g., high cash advance rates, expiring introductory promotional periods, or international transaction fees) that conflict with the user's profile.
-4. SYNTHESIS: Select the single best card for the user and up to two runner-up alternatives.
+4. SYNTHESIS: Select EXACTLY ONE Top Recommended Card and AT LEAST 2 Runner-Up Cards (you must recommend a minimum of 3 cards in total).
 
 Format your final output as a strict, structured JSON object containing the recommended card, a detailed numerical breakdown of its net value, the eligibility confidence score, any important risk warnings, and the excluded major cards reasoning. Do not include speculative financial or trading advice.
 
@@ -122,7 +122,7 @@ JSON SCHEMA:
       "estAnnualInterest": { "display": "Value string (or N/A for charge cards)", "explanation": "Exact mathematical derivation" },
       "avoidableFees": { "display": "Value string", "explanation": "Brief explanation" },
       "estRewardValue": { "display": "Value string", "explanation": "Exact mathematical derivation based on point valuations" },
-      "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Formula: Annual Fee - (Total Points * Point Value) + Estimated Annual Interest" },
+      "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Exact breakdown, e.g. Annual Fee ($440) - Reward Value (75k pts x $0.01/pt = $750) + Interest ($0) = -$310 Net Cost" },
       "keyRisks": ["Risk 1", "Risk 2"],
       "decisionMatrix": {
         "inclusionSteps": ["Step 1 explaining why this matched their profile", "Step 2"],
