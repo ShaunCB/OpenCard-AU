@@ -231,7 +231,7 @@ Return ONLY a raw JSON array of the top 5 most relevant products. Format strictl
 [{"card_id": "exact-id-1", "matched_perks": ["perk1", "perk2"]}]
 No markdown, no explanation, no prose. Use exact "id" strings.`;
         
-        const prescreenAnalysis = await callOpenRouter(env, 'deepseek/deepseek-chat', prescreenPrompt, dataContext);
+        const prescreenAnalysis = await callOpenRouter(env, 'moonshotai/moonshot-v1-32k', prescreenPrompt, dataContext);
         
         let topProductIds = [];
         try {
@@ -373,7 +373,7 @@ JSON SCHEMA:
 
         const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards Metadata:\n${JSON.stringify(synthMetadata, null, 2)}\n\nUser's stated primary goal: ${primaryGoal}\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
 
-        const finalRecommendation = await callOpenRouter(env, 'google/gemini-2.5-pro', synthesizerPrompt, synthesizerUserMessage);
+        const finalRecommendation = await callOpenRouter(env, 'deepseek/deepseek-chat', synthesizerPrompt, synthesizerUserMessage);
         
         return new Response(JSON.stringify({ success: true, recommendation: finalRecommendation }), { status: 200, headers: corsHeaders });
       }
@@ -399,7 +399,7 @@ ${JSON.stringify(minifyCdrData([targetCard])[0], null, 2)}
 
 Provide a concise, direct paragraph explaining exactly why this card was not a top recommendation for this specific user. Be highly specific (e.g. "Excluded because the user selected 'Balance Transfer', and this card does not offer balance transfer facilities" or "The $695 fee offsets the rewards on a $5k spend"). Do NOT output JSON, just the text string.`;
 
-        const reasoning = await callOpenRouter(env, 'google/gemini-2.5-pro', reasoningPrompt, "Explain exclusion now.");
+        const reasoning = await callOpenRouter(env, 'deepseek/deepseek-chat', reasoningPrompt, "Explain exclusion now.");
         return new Response(JSON.stringify({ success: true, reasoning: reasoning.trim() }), { status: 200, headers: corsHeaders });
       }
 
