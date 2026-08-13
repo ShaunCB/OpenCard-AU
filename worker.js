@@ -315,13 +315,14 @@ Be conservative: if in doubt, flag as a risk.`;
         const detailResults = (await Promise.all(fetchPromises)).filter(p => p);
         const minifiedData = minifyCdrData(detailResults);
         
+        const primaryGoal = userProfile.primaryGoal || 'Not specified';
         const safeExtraNeeds = sanitizePromptInput(userProfile.needs);
         
         const synthesizerPrompt = `You are a senior financial product comparison editor. Synthesise the Math and Risk agent reports into a strict JSON object. DO NOT output markdown, code blocks, or any other text. Output ONLY valid JSON.
 
 JSON SCHEMA:
 {
-  "goalSummary": "1-2 sentence summary of user's primary goal",
+  "goalSummary": "1-2 sentence summary of user's primary goal (MUST accurately reflect the user's primaryGoal and extra notes. DO NOT hallucinate details like 'Qantas' or specific brands if the user only mentioned general rewards/travel).",
   "verificationChecklist": ["item 1", "item 2", "..."], // Consolidate all generic data gaps/global verification requirements here. Empty array if none.
   "cards": [
     {
@@ -347,9 +348,10 @@ CRITICAL INSTRUCTIONS:
 1. Ensure the JSON is perfectly formatted.
 2. The cards array MUST contain an object for EVERY card analyzed.
 3. For keyRisks, use concise strings without bullet points or emojis (the UI will add the 🔺).
-4. estNetAnnualCost.numValue must be a raw number representing the financial cost (e.g., if the user makes a net profit of $150, numValue is -150).`;
+4. estNetAnnualCost.numValue must be a raw number representing the financial cost (e.g., if the user makes a net profit of $150, numValue is -150).
+5. DO NOT invent or hallucinate the user's goal. State their goal strictly based on their provided profile.`;
 
-        const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards PRD Context:\n${JSON.stringify(minifiedData, null, 2)}\n\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
+        const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards PRD Context:\n${JSON.stringify(minifiedData, null, 2)}\n\nUser's stated primary goal: ${primaryGoal}\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
 
         const finalRecommendation = await callOpenRouter(env, 'google/gemini-2.5-pro', synthesizerPrompt, synthesizerUserMessage);
         

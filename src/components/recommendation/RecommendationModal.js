@@ -37,7 +37,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_prescreen',
     label: 'Pre-Screener',
     description: 'Filtering all available market cards...',
-    model: 'KIMI K2.7 (262K CONTEXT)',
+    model: 'Gemini 2.5 Flash',
     icon: '🔍',
   },
   {
@@ -45,7 +45,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_math',
     label: 'Value & Cost Analyst',
     description: 'Calculating fees, interest & estimated rewards return',
-    model: 'DEEPSEEK V4 PRO (1.6T REASONING)',
+    model: 'Gemini 2.5 Pro',
     icon: '💰',
   },
   {
@@ -53,7 +53,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_risk',
     label: 'Eligibility Checker',
     description: 'Verifying you qualify and flagging any hidden risks',
-    model: 'DEEPSEEK V4 FLASH',
+    model: 'Gemini 2.5 Flash',
     icon: '🛡️',
   },
   {
@@ -61,7 +61,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_synth',
     label: 'Recommendation Editor',
     description: 'Synthesising findings into your personalised shortlist',
-    model: 'GPT-OSS-20B (OPENAI)',
+    model: 'Gemini 2.5 Pro',
     icon: '✨',
   },
 ];
