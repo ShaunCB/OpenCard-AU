@@ -4,117 +4,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, x-passcode',
 };
 
-// Default CDR data holders for credit & charge card recommendations.
-// These are confirmed publicBaseUris from the Australian CDR Register / data holders.
-const DEFAULT_BANK_URLS = [
-  'https://apigw.americanexpress.com/cdr/unauth',            // American Express (fixed base URL)
-  'https://api.commbank.com.au/public',                      // Commonwealth Bank
-  'https://api.productcloud.com.au/public/LATITUDECARDS',    // Latitude Credit Cards
-  'https://openbank.api.nab.com.au',                         // National Australia Bank
-  'https://digital-api.westpac.com.au',                      // Westpac
-];
-
-async function fetchBankData(url, env, xV = '5', xMinV = '4') {
-  const cache = caches.default;
-  const cacheKey = new Request(url, { method: 'GET', headers: { 'x-v': xV, 'x-min-v': xMinV } });
-  let response = await cache.match(cacheKey);
-  if (!response) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    try {
-      response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'x-v': xV,
-          'x-min-v': xMinV,
-          'Accept': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (compatible; OpenCard-AU/1.0; +https://shauncb.github.io/OpenCard-AU/)'
-        },
-        signal: controller.signal
-      });
-      clearTimeout(timeout);
-      
-      const respondedVersion = response.headers.get('x-v');
-      console.log(`[CDR API] Fetched ${url}. Target: v${xV}, Negotiated: v${respondedVersion}, Status: ${response.status}`);
-      
-      if (response.ok) {
-        const responseToCache = new Response(response.clone().body, response);
-        responseToCache.headers.append("Cache-Control", "s-maxage=86400");
-        await cache.put(cacheKey, responseToCache);
-      }
-    } catch (e) {
-      clearTimeout(timeout);
-      console.warn("Fetch timeout or error for:", url, e.message);
-      return null;
-    }
-  }
-  return response && response.ok ? await response.json() : null;
-}
-
-function minifyCdrData(prdArray) {
-  if (!Array.isArray(prdArray)) return [];
-
-  // Hard-filter: only process credit & charge card products.
-  // This is the CDR product category for credit cards and charge cards.
-  const CARD_CATEGORIES = ['CRED_AND_CHRG_CARDS', 'BUSINESS_CARDS', 'CORPORATE_CARDS'];
-  const cardProducts = prdArray.filter(p => p && CARD_CATEGORIES.includes(p.productCategory));
-
-  return cardProducts.map(product => {
-    const cardArtEntry = Array.isArray(product.cardArt)
-      ? product.cardArt.find(a => a && a.imageUri)
-      : null;
-    const imageUri = cardArtEntry ? cardArtEntry.imageUri : null;
-
-    const minified = {
-      id: product.productId,
-      name: product.name,
-      brand: product.brand || product.brandName,
-      isTailored: product.isTailored,
-      image: imageUri,
-      applicationUri: product.applicationUri || null,
-      _bankUrl: product._bankUrl, // Track origin bank for targeted detail fetching
-      features: [],
-      fees: [],
-      rates: [],
-      eligibility: []
-    };
-
-    if (product.features) {
-      minified.features = product.features
-        .filter(f => f && f.featureType !== 'OTHER' && f.featureType !== 'DIGITAL_BANKING')
-        .map(f => ({ type: f.featureType, info: f.additionalInfo }));
-    }
-    if (product.fees) {
-      minified.fees = product.fees.filter(f => f).map(f => ({
-        type: f.feeType,
-        amount: f.amount != null ? f.amount : (f.fixedAmount?.amount ?? null),
-        name: f.name
-      }));
-    }
-    if (product.lendingRates) {
-      minified.rates = product.lendingRates.filter(r => r).map(r => ({
-        type: r.lendingRateType,
-        rate: r.rate,
-        name: r.name
-      }));
-    }
-    if (product.eligibility) {
-      minified.eligibility = product.eligibility.filter(e => e).map(e => ({
-        type: e.eligibilityType,
-        info: e.additionalInfo,
-        value: e.additionalValue
-      }));
-    }
-
-    Object.keys(minified).forEach(key => {
-      if (Array.isArray(minified[key]) && minified[key].length === 0) delete minified[key];
-      if (minified[key] === null || minified[key] === undefined) delete minified[key];
-    });
-
-    return minified;
-  });
-}
-
+// Data fetching and minification are now handled by the frontend client.
 async function callOpenRouter(env, requestedModel, systemPrompt, userMessage) {
   const apiKey = env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set.");
@@ -183,26 +73,6 @@ export default {
         if (typeof str !== 'string') return 'None';
         return str.replace(/[\u0000-\u001F\u007F]/g, '').replace(/<[^>]*>/g, '').slice(0, maxLen).trim() || 'None';
       };
-
-      // 1. Data Pre-Fetching
-      if (body.action === 'prefetch_data') {
-        const bankUrls = DEFAULT_BANK_URLS;
-        const fetchResults = await Promise.all(
-          bankUrls.map(async bankUrl => {
-            const productsUrl = bankUrl.replace(/\/$/, '') + '/cds-au/v1/banking/products?product-category=CRED_AND_CHRG_CARDS&page-size=100';
-            const res = await fetchBankData(productsUrl, env, '5', '4');
-            if (!res || !res.data || !res.data.products) return { bankUrl, success: false, products: [] };
-            return {
-              bankUrl,
-              success: true,
-              products: res.data.products.map(p => ({ ...p, _bankUrl: bankUrl }))
-            };
-          })
-        );
-        const rawCdrProducts = fetchResults.flatMap(r => r.products);
-        const minifiedData = minifyCdrData(rawCdrProducts);
-        return new Response(JSON.stringify({ success: true, cdrProducts: minifiedData }), { status: 200, headers: corsHeaders });
-      }
 
       // 2. Single-Pass Monolithic Architecture
       if (body.action === 'run_single_analysis') {
@@ -300,7 +170,7 @@ User Profile:
 - Extra Needs: ${sanitizePromptInput(rawExtraNeeds)}
 
 Card Details:
-${JSON.stringify(minifyCdrData([targetCard])[0], null, 2)}
+${JSON.stringify(targetCard, null, 2)}
 
 Provide a concise, direct paragraph explaining exactly why this card was not a top recommendation for this specific user. Be highly specific (e.g. "Excluded because the user selected 'Balance Transfer', and this card does not offer balance transfer facilities" or "The $695 fee offsets the rewards on a $5k spend"). Do NOT output JSON, just the text string.`;
 

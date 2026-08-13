@@ -443,36 +443,7 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     analysis: STATUS.IDLE,
   });
 
-  const [isPrefetching, setIsPrefetching] = useState(false);
-  const [cachedCdrProducts, setCachedCdrProducts] = useState(null);
 
-  useEffect(() => {
-    if (open && !cachedCdrProducts && !isPrefetching) {
-      const prefetch = async () => {
-        setIsPrefetching(true);
-        try {
-          const res = await fetch(WORKER_URL, {
-            method: 'POST',
-            // Passcode is required by worker, even for prefetch if worker enforces it
-            // If the user hasn't authenticated yet, it will fail.
-            // Wait, worker requires passcode? Yes, 'x-passcode' header.
-            // We'll pass it if we have it, or skip. If the worker fails, we will fallback to fetching inside handleAnalyze.
-            headers: { 'Content-Type': 'application/json', 'x-passcode': passcode || '' },
-            body: JSON.stringify({ action: 'prefetch_data' })
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.success) {
-              setCachedCdrProducts(data.cdrProducts);
-            }
-          }
-        } catch (e) {
-          console.error("Prefetch failed:", e);
-        }
-      };
-      prefetch();
-    }
-  }, [open, cachedCdrProducts, isPrefetching, passcode]);
 
   // Tagline cycling state — only active during the parallel phase
   const [taglineIdx, setTaglineIdx] = useState(0);
@@ -611,12 +582,7 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
 
       setAgent('analysis', STATUS.THINKING);
       
-      let finalCdrData = cachedCdrProducts;
-      if (!finalCdrData) {
-        // Fallback to fetch if prefetch failed or wasn't ready
-        const pf = await fetchAgent('prefetch_data', {});
-        finalCdrData = pf.cdrProducts;
-      }
+      let finalCdrData = minifyCdrData(cdrProducts);
       
       if (!finalCdrData || finalCdrData.length === 0) {
         const err = new Error("No eligible credit cards were found in the provided data sources. Please try adding different banks.");
@@ -1218,6 +1184,64 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
       </DialogActions>
     </Dialog>
   );
+}
+
+// ─── Data Minification ────────────────────────────────────────────────────────
+function minifyCdrData(prdArray) {
+  if (!Array.isArray(prdArray)) return [];
+  const CARD_CATEGORIES = ['CRED_AND_CHRG_CARDS', 'BUSINESS_CARDS', 'CORPORATE_CARDS'];
+  const cardProducts = prdArray.filter(p => p && CARD_CATEGORIES.includes(p.productCategory));
+
+  return cardProducts.map(product => {
+    const cardArtEntry = Array.isArray(product.cardArt) ? product.cardArt.find(a => a && a.imageUri) : null;
+    const minified = {
+      id: product.productId,
+      name: product.name,
+      brand: product.brand || product.brandName,
+      isTailored: product.isTailored,
+      image: cardArtEntry ? cardArtEntry.imageUri : null,
+      applicationUri: product.applicationUri || null,
+      _bankUrl: product._bankUrl,
+      features: [],
+      fees: [],
+      rates: [],
+      eligibility: []
+    };
+
+    if (product.features) {
+      minified.features = product.features
+        .filter(f => f && f.featureType !== 'OTHER' && f.featureType !== 'DIGITAL_BANKING')
+        .map(f => ({ type: f.featureType, info: f.additionalInfo }));
+    }
+    if (product.fees) {
+      minified.fees = product.fees.filter(f => f).map(f => ({
+        type: f.feeType,
+        amount: f.amount != null ? f.amount : (f.fixedAmount?.amount ?? null),
+        name: f.name
+      }));
+    }
+    if (product.lendingRates) {
+      minified.rates = product.lendingRates.filter(r => r).map(r => ({
+        type: r.lendingRateType,
+        rate: r.rate,
+        name: r.name
+      }));
+    }
+    if (product.eligibility) {
+      minified.eligibility = product.eligibility.filter(e => e).map(e => ({
+        type: e.eligibilityType,
+        info: e.additionalInfo,
+        value: e.additionalValue
+      }));
+    }
+
+    Object.keys(minified).forEach(key => {
+      if (Array.isArray(minified[key]) && minified[key].length === 0) delete minified[key];
+      if (minified[key] === null || minified[key] === undefined) delete minified[key];
+    });
+
+    return minified;
+  });
 }
 
 // ─── URL resolution (unchanged) ───────────────────────────────────────────────
