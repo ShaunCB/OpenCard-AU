@@ -334,6 +334,35 @@ const useStyles = makeStyles((theme) => ({
     fontSize: '0.8rem',
     marginTop: theme.spacing(1),
     marginBottom: theme.spacing(2),
+  },
+  cuttingRoomRoot: {
+    marginTop: '24px',
+    padding: '16px',
+    backgroundColor: '#f1f5f9',
+    borderRadius: '8px',
+    '@media (prefers-color-scheme: dark)': {
+      backgroundColor: 'rgba(30, 41, 59, 0.9)',
+      color: '#f8fafc',
+    },
+  },
+  cuttingRoomText: {
+    marginBottom: '12px',
+    color: '#475569',
+    '@media (prefers-color-scheme: dark)': {
+      color: '#cbd5e1',
+    },
+  },
+  reasoningBox: {
+    marginTop: '12px',
+    padding: '12px',
+    backgroundColor: '#fff',
+    borderRadius: '4px',
+    border: '1px solid #cbd5e1',
+    '@media (prefers-color-scheme: dark)': {
+      backgroundColor: '#0f172a',
+      borderColor: '#334155',
+      color: '#f8fafc',
+    },
   }
 }));
 
@@ -500,6 +529,74 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     }
   };
 
+  const fetchAgent = async (action, bodyData = {}) => {
+    const profile = { 
+      primaryGoal, 
+      payInFull, 
+      topCategories, 
+      income: parseIntSafe(income, 100000),
+      monthlySpend: parseIntSafe(monthlySpend, 5000),
+      age: parseIntSafe(age, 30),
+      needs: extraNeeds 
+    };
+    const baseReq = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-passcode': passcode },
+    };
+    
+    const MAX_RETRIES = 2;
+    let attempt = 0;
+    
+    while (attempt <= MAX_RETRIES) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 90000);
+        
+        const res = await fetch(WORKER_URL, {
+          ...baseReq,
+          body: JSON.stringify({ action, profile, ...bodyData }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        const textPayload = await res.text();
+        let data;
+        try {
+          data = JSON.parse(textPayload);
+        } catch (parseErr) {
+          console.error('[Credit Card Recommender Debug]: JSON Parse Error', parseErr);
+          const e = new Error('Invalid JSON response from server');
+          e.status = res.status;
+          e.payload = textPayload;
+          e.stack = parseErr.stack;
+          throw e;
+        }
+        
+        if (!res.ok) {
+          const err = new Error(data.details || data.error || `Failed on ${action}`);
+          err.status = res.status;
+          err.payload = textPayload;
+          console.error('[Credit Card Recommender Debug]: API Error', err);
+          throw err;
+        }
+        return data;
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          console.error(`[Credit Card Recommender Debug]: Request timeout on ${action} (attempt ${attempt + 1})`);
+        } else {
+          console.error(`[Credit Card Recommender Debug]: Network/CORS Error on ${action} (attempt ${attempt + 1})`, err);
+        }
+        
+        if (attempt >= MAX_RETRIES) {
+          throw new Error(`Connection to AI server dropped or timed out after ${MAX_RETRIES + 1} attempts. Please try again.`);
+        }
+        
+        attempt++;
+        await new Promise(resolve => setTimeout(resolve, attempt * 1500));
+      }
+    }
+  };
+
   // ── Analysis pipeline ────────────────────────────────────────────────────────
   const handleAnalyze = async () => {
     if (!primaryGoal || !payInFull) {
@@ -511,74 +608,6 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     resetAgentStatus();
 
     try {
-      const profile = { 
-        primaryGoal, 
-        payInFull, 
-        topCategories, 
-        income: parseIntSafe(income, 100000),
-        monthlySpend: parseIntSafe(monthlySpend, 5000),
-        age: parseIntSafe(age, 30),
-        needs: extraNeeds 
-      };
-      const baseReq = {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-passcode': passcode },
-      };
-
-      const fetchAgent = async (action, bodyData = {}) => {
-        const MAX_RETRIES = 2;
-        let attempt = 0;
-        
-        while (attempt <= MAX_RETRIES) {
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout for monolithic LLM
-            
-            const res = await fetch(WORKER_URL, {
-              ...baseReq,
-              body: JSON.stringify({ action, profile, ...bodyData }),
-              signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            
-            const textPayload = await res.text();
-            let data;
-            try {
-              data = JSON.parse(textPayload);
-            } catch (parseErr) {
-              console.error('[Credit Card Recommender Debug]: JSON Parse Error', parseErr);
-              const e = new Error('Invalid JSON response from server');
-              e.status = res.status;
-              e.payload = textPayload;
-              e.stack = parseErr.stack;
-              throw e;
-            }
-            
-            if (!res.ok) {
-              const err = new Error(data.details || data.error || `Failed on ${action}`);
-              err.status = res.status;
-              err.payload = textPayload;
-              console.error('[Credit Card Recommender Debug]: API Error', err);
-              throw err;
-            }
-            return data;
-          } catch (err) {
-            if (err.name === 'AbortError') {
-              console.error(`[Credit Card Recommender Debug]: Request timeout on ${action} (attempt ${attempt + 1})`);
-            } else {
-              console.error(`[Credit Card Recommender Debug]: Network/CORS Error on ${action} (attempt ${attempt + 1})`, err);
-            }
-            
-            if (attempt >= MAX_RETRIES) {
-              throw new Error(`Connection to AI server dropped or timed out after ${MAX_RETRIES + 1} attempts. Please try again.`);
-            }
-            
-            attempt++;
-            // Exponential backoff: 1.5s, then 3s
-            await new Promise(resolve => setTimeout(resolve, attempt * 1500));
-          }
-        }
-      };
 
       setAgent('analysis', STATUS.THINKING);
       
@@ -627,8 +656,6 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     
     setExclusionLoading(true);
     try {
-      const profile = { primaryGoal, payInFull, topCategories, income: parseIntSafe(income, 100000), monthlySpend: parseIntSafe(monthlySpend, 5000), age: parseIntSafe(age, 30), needs: extraNeeds };
-      
       // We pass the raw cdrProduct detail directly to avoid worker re-fetching
       const targetCard = cdrProducts.find(c => c.productId === cardId);
       
@@ -693,14 +720,16 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
       <DialogContent className={classes.dialog}>
 
         {/* ASIC RG 244 Disclaimer */}
-        <Paper className={classes.disclaimerBox} elevation={0}>
-          <Typography className={classes.disclaimerTitle}>
-            IMPORTANT: NOT FINANCIAL ADVICE
-          </Typography>
-          <Typography variant="body2">
-            The information provided by this Multi-Agent AI system is general in nature and does not constitute personal financial product advice. It does not take into account your personal objectives, financial situation, or needs. Please consider the Product Disclosure Statement (PDS) and Target Market Determination (TMD) provided by the relevant financial institution before making a decision. (ASIC RG 244 Compliance)
-          </Typography>
-        </Paper>
+        {!isAuthenticated && (
+          <Paper className={classes.disclaimerBox} elevation={0}>
+            <Typography className={classes.disclaimerTitle}>
+              IMPORTANT: NOT FINANCIAL ADVICE
+            </Typography>
+            <Typography variant="body2">
+              The information provided by this AI system is general in nature and does not constitute personal financial product advice. It does not take into account your personal objectives, financial situation, or needs. Please consider the Product Disclosure Statement (PDS) and Target Market Determination (TMD) provided by the relevant financial institution before making a decision. (ASIC RG 244 Compliance)
+            </Typography>
+          </Paper>
+        )}
 
         {!recommendation ? (
           <>
@@ -708,7 +737,7 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
             {!isAuthenticated && !loading && (
               <>
                 <Typography variant="body1" gutterBottom>
-                  Please enter the administrator passcode to activate the Multi-Agent AI pipeline.
+                  Please enter the administrator passcode to activate the AI pipeline.
                 </Typography>
                 <TextField
                   fullWidth
@@ -729,12 +758,12 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
             {isAuthenticated && !loading && !error && (
               <>
                 <Typography variant="body1" gutterBottom>
-                  Tell us about yourself so our AI agents can find the right card for you.
+                  Tell us about yourself so our AI Architect can find the right card for you.
                 </Typography>
 
                 {hasNoCdrData && (
                   <div className={classes.noCdrWarning} role="alert">
-                    ⚠️ <strong>No product data loaded.</strong> Please go back to the <strong>Credit &amp; Charge Cards</strong> tab, load at least one Data Source, and re-open this panel. The AI agents require real CDR data to generate a recommendation.
+                    ⚠️ <strong>No product data loaded.</strong> Please go back to the <strong>Credit &amp; Charge Cards</strong> tab, load at least one Data Source, and re-open this panel. The AI requires real CDR data to generate a recommendation.
                   </div>
                 )}
 
@@ -771,24 +800,37 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
                   <MenuItem value="No, I carry a balance">No, I carry a balance</MenuItem>
                 </TextField>
 
-                <TextField
-                  select
-                  fullWidth
-                  variant="outlined"
-                  label="What are your top two monthly spending categories?"
-                  value={topCategories}
-                  onChange={(e) => setTopCategories(e.target.value)}
-                  margin="normal"
-                  InputLabelProps={{ shrink: true }}
-                  SelectProps={{
-                    multiple: true,
-                    renderValue: (selected) => selected.join(', '),
-                  }}
-                >
-                  {CATEGORY_OPTIONS.map(opt => (
-                    <MenuItem key={opt} value={opt}>{opt}</MenuItem>
-                  ))}
-                </TextField>
+                <div style={{ margin: '16px 0' }}>
+                  <Typography variant="body2" color="textSecondary" style={{ marginBottom: 8 }}>
+                    What are your top two monthly spending categories? (Max 2)
+                  </Typography>
+                  <Grid container spacing={1}>
+                    {CATEGORY_OPTIONS.map(opt => {
+                      const isChecked = topCategories.includes(opt);
+                      const isDisabled = !isChecked && topCategories.length >= 2;
+                      return (
+                        <Grid item xs={6} sm={4} key={opt}>
+                          <label style={{ display: 'flex', alignItems: 'center', cursor: isDisabled ? 'not-allowed' : 'pointer', opacity: isDisabled ? 0.5 : 1, fontSize: '0.9rem' }}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              disabled={isDisabled}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  if (topCategories.length < 2) setTopCategories([...topCategories, opt]);
+                                } else {
+                                  setTopCategories(topCategories.filter(item => item !== opt));
+                                }
+                              }}
+                              style={{ marginRight: 8 }}
+                            />
+                            {opt}
+                          </label>
+                        </Grid>
+                      );
+                    })}
+                  </Grid>
+                </div>
 
                 <Grid container spacing={1} style={{ marginTop: 4 }}>
                   <Grid item xs={12} sm={4}>
@@ -842,9 +884,9 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
                 {/* Only show agent rows during the analysis phase */}
                 {isAuthenticated && (
                   <>
-                    <div className={classes.loadingSubline}>
-                      Your analysis is being handled by three specialist AI agents working in parallel
-                    </div>
+                    <Typography variant="body2" className={classes.loadingSubline} style={{ marginBottom: 16 }}>
+                      Your analysis is being handled by our AI Architect.
+                    </Typography>
                     {AGENT_DEFINITIONS.map(agent => (
                       <AgentProgressRow
                         key={agent.id}
@@ -1068,11 +1110,25 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
               </div>
             )}
 
-            <div style={{ marginTop: '24px', padding: '16px', backgroundColor: '#f1f5f9', borderRadius: '8px' }}>
+            <div className={classes.cuttingRoomRoot}>
               <Typography variant="subtitle1" style={{ fontWeight: 'bold' }}>✂️ The Cutting Room Floor</Typography>
-              <Typography variant="body2" style={{ marginBottom: '12px', color: '#475569' }}>
+              <Typography variant="body2" className={classes.cuttingRoomText}>
                 In-Scope Cards Not Recommended. Select a card to see exactly why the AI excluded it based on your profile.
               </Typography>
+              
+              {recommendation.excludedMajorCards && recommendation.excludedMajorCards.length > 0 && (
+                <div className={classes.reasoningBox} style={{ marginBottom: '16px' }}>
+                  <Typography variant="subtitle2" style={{ fontWeight: 'bold', marginBottom: '8px' }}>Excluded Major Bank Cards:</Typography>
+                  <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.85rem' }}>
+                    {recommendation.excludedMajorCards.map((mc, idx) => (
+                      <li key={idx} style={{ marginBottom: '4px' }}>
+                        <strong>{mc.cardName} ({mc.brand})</strong>: {mc.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <TextField
                 select
                 fullWidth
@@ -1095,7 +1151,7 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
               )}
               
               {exclusionReasoning && !exclusionLoading && (
-                <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #cbd5e1' }}>
+                <div className={classes.reasoningBox}>
                   <Typography variant="body2"><strong>AI Assessment:</strong> {exclusionReasoning}</Typography>
                 </div>
               )}

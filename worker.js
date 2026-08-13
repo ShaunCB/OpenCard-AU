@@ -224,11 +224,17 @@ export default {
 
 Execute the following logical steps internally before returning your output:
 1. PRE-SCREENING: Filter out any cards in the CDR data where the user does not meet the minimum income, age, or residency eligibility criteria.
+   - CRITICAL DATA HOLDER MANDATE: You must evaluate products across all provided issuers. If standard major bank cards (e.g., CommBank, NAB, Westpac) are excluded, you MUST document the specific disqualification reason for each in the "excludedMajorCards" array.
+   - If the user's goal is "Flexible Bank Points", prioritize cards with flexible bank reward programs over direct-earn airline cards (like Velocity or Qantas).
 2. VALUE & COST ANALYSIS: For the remaining eligible cards, calculate the net annual value by weighing the annual fees and standard interest rates against the estimated rewards return based on the user's stated spending habits.
+   - REWARD VALUATION RULES (CRITICAL): NEVER assume 1 Point = $1.00 AUD. You must apply these baseline valuations:
+     - Airline Frequent Flyer Points (e.g., Velocity, Qantas): $0.01 AUD per point.
+     - Flexible Bank Reward Points (e.g., Amex MR, CBA Awards, NAB Rewards): $0.005 AUD per point.
+   - Calculate Est. Net Annual Cost using this exact formula: Annual Fee - (Total Points * Point Value) + Estimated Annual Interest.
 3. RISK ASSESSMENT: Flag any hidden risks (e.g., high cash advance rates, expiring introductory promotional periods, or international transaction fees) that conflict with the user's profile.
 4. SYNTHESIS: Select the single best card for the user and up to two runner-up alternatives.
 
-Format your final output as a strict, structured JSON object containing the recommended card, a detailed numerical breakdown of its net value, the eligibility confidence score, and any important risk warnings. This JSON will be parsed directly by the UI to render the recommendation cards. Do not include speculative financial or trading advice; strictly evaluate consumer credit metrics.
+Format your final output as a strict, structured JSON object containing the recommended card, a detailed numerical breakdown of its net value, the eligibility confidence score, any important risk warnings, and the excluded major cards reasoning. Do not include speculative financial or trading advice.
 
 JSON SCHEMA:
 {
@@ -244,8 +250,8 @@ JSON SCHEMA:
       "annualFee": "Annual fee string",
       "estAnnualInterest": { "display": "Value string (or N/A for charge cards)", "explanation": "Exact mathematical derivation" },
       "avoidableFees": { "display": "Value string", "explanation": "Brief explanation" },
-      "estRewardValue": { "display": "Value string", "explanation": "Exact mathematical derivation" },
-      "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Mathematical formula string" },
+      "estRewardValue": { "display": "Value string", "explanation": "Exact mathematical derivation based on point valuations" },
+      "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Formula: Annual Fee - (Total Points * Point Value) + Estimated Annual Interest" },
       "keyRisks": ["Risk 1", "Risk 2"],
       "decisionMatrix": {
         "inclusionSteps": ["Step 1 explaining why this matched their profile", "Step 2"],
@@ -253,6 +259,9 @@ JSON SCHEMA:
       },
       "goalAlignment": "X/5"
     }
+  ],
+  "excludedMajorCards": [
+    { "brand": "Brand name", "cardName": "Card name", "reason": "Specific disqualification reason" }
   ],
   "topPickReason": "2-sentence reason naming the best card",
   "dataGaps": ["gap 1"]
