@@ -74,7 +74,7 @@ export const retrieveProductList = (dataSourceIdx, baseUrl, productListUrl, xV, 
             
             // Automatically fetch details for the recommender pre-screener
             json.data.products.forEach(p => {
-              dispatch(retrieveProductDetail(dataSourceIdx, baseUrl, p.productId, '7', '1'))
+              dispatch(retrieveProductDetail(dataSourceIdx, baseUrl, p.productId, '7', '6'))
             })
           }
           return {idx: dataSourceIdx, response: json, responseXV: responseXV || '5'}
@@ -100,7 +100,7 @@ export const retrieveProductDetail = (dataSourceIdx, url, productId, xV, xMinV) 
     headers: new Headers({
       ...headers,
       'x-v': String(7),
-      'x-min-v': String(1),
+      'x-min-v': String(6),
       'Accept': 'application/json'
     })
   })

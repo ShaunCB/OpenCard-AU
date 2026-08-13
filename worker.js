@@ -4,17 +4,32 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, x-passcode',
 };
 
-async function fetchBankData(url, env, xV = '5', xMinV = '1') {
+// Default CDR data holders for credit & charge card recommendations.
+// These are confirmed publicBaseUris from the Australian CDR Register / data holders.
+const DEFAULT_BANK_URLS = [
+  'https://apigw.americanexpress.com/cdr/unauth/cds-au/v1', // American Express
+  'https://api.commbank.com.au/public',                      // Commonwealth Bank
+  'https://api.productcloud.com.au/public/LATITUDECARDS',    // Latitude Credit Cards
+  'https://openbank.api.nab.com.au',                         // National Australia Bank
+  'https://digital-api.westpac.com.au',                      // Westpac
+];
+
+async function fetchBankData(url, env, xV = '5', xMinV = '4') {
   const cache = caches.default;
   const cacheKey = new Request(url, { method: 'GET', headers: { 'x-v': xV, 'x-min-v': xMinV } });
   let response = await cache.match(cacheKey);
   if (!response) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       response = await fetch(url, {
         method: 'GET',
-        headers: { 'x-v': xV, 'x-min-v': xMinV },
+        headers: {
+          'x-v': xV,
+          'x-min-v': xMinV,
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (compatible; OpenCard-AU/1.0; +https://shauncb.github.io/OpenCard-AU/)'
+        },
         signal: controller.signal
       });
       clearTimeout(timeout);
@@ -156,25 +171,43 @@ export default {
 
       // 1. Pre-Screening: Lazy fetch high-level products
       if (body.action === 'run_prescreen') {
-        const bankUrls = (Array.isArray(body.bankUrls) ? body.bankUrls : []).slice(0, 5);
-        if (bankUrls.length === 0) return new Response(JSON.stringify({ error: 'Bad Request', details: 'No bankUrls provided.' }), { status: 400, headers: corsHeaders });
+        // Use provided bankUrls, or fall back to the hardcoded defaults
+        const bankUrls = (Array.isArray(body.bankUrls) && body.bankUrls.length > 0)
+          ? body.bankUrls.slice(0, 5)
+          : DEFAULT_BANK_URLS;
 
-        const fetchPromises = bankUrls.map(bankUrl => {
-          const productsUrl = bankUrl.replace(/\/$/, '') + '/banking/products?product-category=CRED_AND_CHRG_CARDS';
-          return fetchBankData(productsUrl, env, '5', '1').then(res => {
-            if (!res || !res.data || !res.data.products) return [];
-            return res.data.products.map(p => ({ ...p, _bankUrl: bankUrl }));
-          });
-        });
-        
-        const allResults = await Promise.all(fetchPromises);
-        const rawCdrProducts = allResults.flat();
-        
-        if (rawCdrProducts.length === 0) {
-          console.error("Worker Diagnostic: All bank fetches returned empty or failed. Possible Cloudflare IP block.");
-          return new Response(JSON.stringify({ error: 'Worker Fetch Failed', details: 'The banks blocked the data fetch from the Cloudflare Worker.' }), { status: 502, headers: corsHeaders });
+        const fetchResults = await Promise.all(
+          bankUrls.map(async bankUrl => {
+            const productsUrl = bankUrl.replace(/\/$/, '') + '/banking/products?product-category=CRED_AND_CHRG_CARDS';
+            // Products list: x-v 5, x-min-v 4
+            const res = await fetchBankData(productsUrl, env, '5', '4');
+            if (!res || !res.data || !res.data.products) {
+              console.error(`[CDR] Bank fetch failed or returned no products: ${bankUrl}`);
+              return { bankUrl, success: false, products: [] };
+            }
+            return {
+              bankUrl,
+              success: true,
+              products: res.data.products.map(p => ({ ...p, _bankUrl: bankUrl }))
+            };
+          })
+        );
+
+        const failedBanks = fetchResults.filter(r => !r.success).map(r => r.bankUrl);
+        const rawCdrProducts = fetchResults.flatMap(r => r.products);
+
+        if (failedBanks.length > 0) {
+          console.warn(`[CDR] ${failedBanks.length} bank(s) failed:`, failedBanks);
         }
-        
+
+        if (rawCdrProducts.length === 0) {
+          return new Response(JSON.stringify({
+            error: 'Worker Fetch Failed',
+            details: 'All bank CDR endpoints failed to return products. They may be blocking Cloudflare Worker IPs.',
+            failedBanks,
+          }), { status: 502, headers: corsHeaders });
+        }
+
         const minifiedData = minifyCdrData(rawCdrProducts);
         
         const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nAvailable Credit Cards:\n${JSON.stringify(minifiedData, null, 2)}`;
@@ -186,7 +219,6 @@ Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markd
         
         let topProductIds = [];
         try {
-          // Use non-greedy regex to prevent matching trailing markdown backticks
           const jsonMatch = prescreenAnalysis.match(/\[.*?\]/s);
           topProductIds = JSON.parse(jsonMatch ? jsonMatch[0] : prescreenAnalysis);
         } catch (e) {
@@ -199,10 +231,12 @@ Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markd
 
         if (topProducts.length === 0) {
           console.error("Worker Diagnostic: LLM returned no valid IDs.", { prescreenAnalysis, topProductIds });
-          return new Response(JSON.stringify({ error: 'DataValidationError', details: 'The AI model hallucinated fake IDs or failed to find matches.', llmOutput: prescreenAnalysis }), { status: 502, headers: corsHeaders });
+          // Graceful fallback: use first 5 products directly instead of failing hard
+          const fallbackProducts = minifiedData.slice(0, 5).map(p => ({ id: p.id, bankUrl: p._bankUrl }));
+          return new Response(JSON.stringify({ success: true, topProducts: fallbackProducts, failedBanks, warning: 'Pre-screener fallback used.' }), { status: 200, headers: corsHeaders });
         }
 
-        return new Response(JSON.stringify({ success: true, topProducts }), { status: 200, headers: corsHeaders });
+        return new Response(JSON.stringify({ success: true, topProducts, failedBanks }), { status: 200, headers: corsHeaders });
       }
 
       // 2. Parallel Agent Execution (Math & Risk)
@@ -212,7 +246,7 @@ Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markd
 
         const fetchPromises = topProducts.map(tp => {
           const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/banking/products/' + encodeURIComponent(tp.id);
-          return fetchBankData(detailUrl, env, '7', '1').then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
+          return fetchBankData(detailUrl, env, '7', '6').then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
         });
         
         const detailResults = (await Promise.all(fetchPromises)).filter(p => p);
@@ -272,7 +306,7 @@ Be conservative: if in doubt, flag as a risk.`;
 
         const fetchPromises = topProducts.map(tp => {
           const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/banking/products/' + encodeURIComponent(tp.id);
-          return fetchBankData(detailUrl, env, '7', '1').then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
+          return fetchBankData(detailUrl, env, '7', '6').then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
         });
         const detailResults = (await Promise.all(fetchPromises)).filter(p => p);
         const minifiedData = minifyCdrData(detailResults);
