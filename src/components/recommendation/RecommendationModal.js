@@ -61,7 +61,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_synth',
     label: 'Recommendation Editor',
     description: 'Synthesising findings into your personalised shortlist',
-    model: 'GPT-OSS-20B (OPENAI)',
+    model: 'DEEPSEEK V4 FLASH',
     icon: '✨',
   },
 ];
