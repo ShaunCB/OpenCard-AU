@@ -183,21 +183,14 @@ export default {
         return str.replace(/[\u0000-\u001F\u007F]/g, '').replace(/<[^>]*>/g, '').slice(0, maxLen).trim() || 'None';
       };
 
-      // 1. Pre-Screening: Lazy fetch high-level products
-      if (body.action === 'run_prescreen') {
-        // Always use DEFAULT_BANK_URLS — do NOT trust the frontend to supply correct bank URLs.
-        // The frontend may have energy or other non-banking data sources in Redux state.
+      // 1. Data Pre-Fetching
+      if (body.action === 'prefetch_data') {
         const bankUrls = DEFAULT_BANK_URLS;
-
         const fetchResults = await Promise.all(
           bankUrls.map(async bankUrl => {
             const productsUrl = bankUrl.replace(/\/$/, '') + '/cds-au/v1/banking/products?product-category=CRED_AND_CHRG_CARDS&page-size=100';
-            // Products list: x-v 5, x-min-v 4
             const res = await fetchBankData(productsUrl, env, '5', '4');
-            if (!res || !res.data || !res.data.products) {
-              console.error(`[CDR] Bank fetch failed or returned no products: ${bankUrl}`);
-              return { bankUrl, success: false, products: [] };
-            }
+            if (!res || !res.data || !res.data.products) return { bankUrl, success: false, products: [] };
             return {
               bankUrl,
               success: true,
@@ -205,135 +198,37 @@ export default {
             };
           })
         );
-
-        const failedBanks = fetchResults.filter(r => !r.success).map(r => r.bankUrl);
         const rawCdrProducts = fetchResults.flatMap(r => r.products);
-
-        if (failedBanks.length > 0) {
-          console.warn(`[CDR] ${failedBanks.length} bank(s) failed:`, failedBanks);
-        }
-
-        if (rawCdrProducts.length === 0) {
-          return new Response(JSON.stringify({
-            error: 'Worker Fetch Failed',
-            details: 'All bank CDR endpoints failed to return products. They may be blocking Cloudflare Worker IPs.',
-            failedBanks,
-          }), { status: 502, headers: corsHeaders });
-        }
-
         const minifiedData = minifyCdrData(rawCdrProducts);
-        
-        const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nAvailable Credit Cards:\n${JSON.stringify(minifiedData, null, 2)}`;
-        const prescreenPrompt = `You are a high-speed AI screener. Filter the provided credit/charge cards based on the user's profile.
-CRITICAL SCOPE RULE: If the user's primary goal is "0% Intro APR / Balance Transfer", you MUST instantly exclude any card that does not explicitly offer balance transfers (e.g. Charge Cards or most Amex cards without BT features).
-
-Return ONLY a raw JSON array of the top 5 most relevant products. Format strictly as:
-[{"card_id": "exact-id-1", "matched_perks": ["perk1", "perk2"]}]
-No markdown, no explanation, no prose. Use exact "id" strings.`;
-        
-        const prescreenAnalysis = await callOpenRouter(env, 'moonshotai/moonshot-v1-32k', prescreenPrompt, dataContext);
-        
-        let topProductIds = [];
-        try {
-          const jsonMatch = prescreenAnalysis.match(/\[.*?\]/s);
-          const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : prescreenAnalysis);
-          topProductIds = parsed.map(item => typeof item === 'string' ? item : item.card_id);
-        } catch (e) {
-          topProductIds = minifiedData.slice(0, 5).map(p => p.id);
-        }
-        
-        const topProducts = minifiedData
-          .filter(p => topProductIds.includes(p.id))
-          .map(p => ({ id: p.id, bankUrl: p._bankUrl }));
-
-        if (topProducts.length === 0) {
-          console.error("Worker Diagnostic: LLM returned no valid IDs.", { prescreenAnalysis, topProductIds });
-          const fallbackProducts = minifiedData.slice(0, 5).map(p => ({ id: p.id, bankUrl: p._bankUrl }));
-          return new Response(JSON.stringify({ success: true, topProducts: fallbackProducts, failedBanks, warning: 'Pre-screener fallback used.' }), { status: 200, headers: corsHeaders });
-        }
-
-        return new Response(JSON.stringify({ success: true, topProducts, failedBanks }), { status: 200, headers: corsHeaders });
+        return new Response(JSON.stringify({ success: true, cdrProducts: minifiedData }), { status: 200, headers: corsHeaders });
       }
 
-      // 2. Parallel Agent Execution (Math & Risk)
-      if (body.action === 'run_analysis') {
-        const topProducts = (body.topProducts || []).slice(0, 5);
-        if (topProducts.length === 0) return new Response(JSON.stringify({ error: 'Bad Request', details: 'No topProducts provided.' }), { status: 400, headers: corsHeaders });
-
-        const fetchPromises = topProducts.map(tp => {
-          const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/cds-au/v1/banking/products/' + encodeURIComponent(tp.id);
-          return fetchBankData(detailUrl, env, '7', '6').then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
-        });
+      // 2. Single-Pass Monolithic Architecture
+      if (body.action === 'run_single_analysis') {
+        const { cdrProducts } = body;
+        let dataToProcess = cdrProducts || [];
         
-        const detailResults = (await Promise.all(fetchPromises)).filter(p => p);
-        const minifiedData = minifyCdrData(detailResults);
-        const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nCandidate Cards Details:\n${JSON.stringify(minifiedData, null, 2)}`;
+        let stringifiedData = JSON.stringify(dataToProcess);
+        if (stringifiedData.length > 400000) {
+           dataToProcess = dataToProcess.filter(p => {
+               const lowerName = (p.name || '').toLowerCase();
+               return !lowerName.includes('business') && !lowerName.includes('commercial') && !lowerName.includes('corporate');
+           });
+           stringifiedData = JSON.stringify(dataToProcess);
+        }
 
         const { income, monthlySpend, primaryGoal, age, needs: rawExtraNeeds, payInFull, topCategories } = userProfile;
-        const safeExtraNeeds = sanitizePromptInput(rawExtraNeeds);
         const cats = Array.isArray(topCategories) ? topCategories.join(', ') : 'None specified';
-
-        const mathAgentPrompt = `You are a Value & Cost Analyst. Calculate true annual cost/value for each card.
-User Input:
-- Pays balance in full: ${payInFull}
-- Monthly Spend: $${monthlySpend}
-- Top Categories: ${cats}
-
-Rules:
-1. Card Type: Determine if the product is a "Credit Card" or "Charge Card".
-2. Interest: If the user pays in full ("Yes"), interest is $0. If they carry a balance ("No"), calculate Est Interest on revolving 30% of their monthly spend (i.e., Monthly Spend * 0.30 * 12 * Purchase Rate). However, if it's a Charge Card, Interest is ALWAYS N/A (must be paid in full).
-3. Rewards: Calculate estimated value based on their top categories vs the card's points program.
-4. Net Annual Cost = (Annual Fee + Est Interest) - Est Reward Value.
-
-Provide exact mathematical derivation strings for explanations (e.g., "$5000 spend * 12 months = 60,000 points...").
-
-Return ONLY a raw JSON object mapped by card_id. No prose.
-Format:
-{
-  "card_id": { 
-    "cardType": "Credit Card", 
-    "annualFee": 150, 
-    "estInterest": { "value": 0, "explanation": "Calculated on a revolving balance of $0..." }, 
-    "estRewardValue": { "value": 50, "explanation": "($5000 monthly spend * 12) = ..." }, 
-    "netAnnualCost": { "value": 100, "explanation": "Formula: Annual Fee ($150) + Est. Interest ($0) - Est. Reward Value ($50) = $100" }, 
-    "goalAlignmentScore": 4 
-  }
-}`;
-
-        const riskAgentPrompt = `You are an Eligibility Checker. Perform strict boolean evaluation on eligibility criteria.
-Return ONLY a raw JSON object mapped by card_id. No prose.
-Format:
-{
-  "card_id": { "eligible": true, "failedCriteria": [], "hiddenRisks": ["high revert rate"] }
-}`;
-
-        // Execute Agent 2 and Agent 3 CONCURRENTLY using Promise.all()
-        const [mathAnalysis, riskAnalysis] = await Promise.all([
-          callOpenRouter(env, 'deepseek/deepseek-v4-flash', mathAgentPrompt, dataContext),
-          callOpenRouter(env, 'deepseek/deepseek-v4-flash', riskAgentPrompt, dataContext)
-        ]);
-
-        return new Response(JSON.stringify({ success: true, mathAnalysis, riskAnalysis }), { status: 200, headers: corsHeaders });
-      }
-
-      // 3. Final Synthesis
-      if (body.action === 'run_synth') {
-        const { mathAnalysis, riskAnalysis } = body;
-        const topProducts = (body.topProducts || []).slice(0, 5);
-        if (!mathAnalysis || !riskAnalysis) return new Response(JSON.stringify({ error: 'Bad Request', details: 'Missing agent analysis outputs.' }), { status: 400, headers: corsHeaders });
-        if (topProducts.length === 0) return new Response(JSON.stringify({ error: 'Bad Request', details: 'No topProducts provided.' }), { status: 400, headers: corsHeaders });
-
-        const fetchPromises = topProducts.map(tp => {
-          const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/cds-au/v1/banking/products/' + encodeURIComponent(tp.id);
-          return fetchBankData(detailUrl, env, '7', '6').then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
-        });
-        const detailResults = (await Promise.all(fetchPromises)).filter(p => p);
-        const minifiedData = minifyCdrData(detailResults);
         
-        const primaryGoal = userProfile.primaryGoal || 'Not specified';
-        const safeExtraNeeds = sanitizePromptInput(userProfile.needs);
-        
-        const synthesizerPrompt = `You are the Recommendation Editor. Synthesise the structured Math and Risk outputs into the final JSON format. DO NOT output markdown, prose, or anything other than valid JSON.
+        const systemPrompt = `You are an expert Consumer Data Right (CDR) Credit Card Recommender. Your goal is to analyze the provided user financial profile against the provided JSON array of available credit card products and output a synthesized, highly accurate recommendation.
+
+Execute the following logical steps internally before returning your output:
+1. PRE-SCREENING: Filter out any cards in the CDR data where the user does not meet the minimum income, age, or residency eligibility criteria.
+2. VALUE & COST ANALYSIS: For the remaining eligible cards, calculate the net annual value by weighing the annual fees and standard interest rates against the estimated rewards return based on the user's stated spending habits.
+3. RISK ASSESSMENT: Flag any hidden risks (e.g., high cash advance rates, expiring introductory promotional periods, or international transaction fees) that conflict with the user's profile.
+4. SYNTHESIS: Select the single best card for the user and up to two runner-up alternatives.
+
+Format your final output as a strict, structured JSON object containing the recommended card, a detailed numerical breakdown of its net value, the eligibility confidence score, and any important risk warnings. This JSON will be parsed directly by the UI to render the recommendation cards. Do not include speculative financial or trading advice; strictly evaluate consumer credit metrics.
 
 JSON SCHEMA:
 {
@@ -347,10 +242,10 @@ JSON SCHEMA:
       "applicationUri": "application url or null",
       "eligibility": "Eligibility status",
       "annualFee": "Annual fee string",
-      "estAnnualInterest": { "display": "Value string (or N/A for charge cards)", "explanation": "Exact mathematical derivation from Math Agent" },
+      "estAnnualInterest": { "display": "Value string (or N/A for charge cards)", "explanation": "Exact mathematical derivation" },
       "avoidableFees": { "display": "Value string", "explanation": "Brief explanation" },
-      "estRewardValue": { "display": "Value string", "explanation": "Exact mathematical derivation from Math Agent" },
-      "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Mathematical formula string from Math Agent" },
+      "estRewardValue": { "display": "Value string", "explanation": "Exact mathematical derivation" },
+      "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Mathematical formula string" },
       "keyRisks": ["Risk 1", "Risk 2"],
       "decisionMatrix": {
         "inclusionSteps": ["Step 1 explaining why this matched their profile", "Step 2"],
@@ -363,17 +258,17 @@ JSON SCHEMA:
   "dataGaps": ["gap 1"]
 }`;
 
-        const synthMetadata = minifiedData.map(c => ({
-          id: c.id,
-          name: c.name,
-          brand: c.brand,
-          image: c.image,
-          applicationUri: c.applicationUri
-        }));
+        const userMessage = `User Profile:
+- Goal: ${primaryGoal}
+- Pays balance in full: ${payInFull}
+- Spend: $${monthlySpend}/month (Top categories: ${cats})
+- Income: $${income}, Age: ${age}
+- Extra Needs: ${sanitizePromptInput(rawExtraNeeds)}
 
-        const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards Metadata:\n${JSON.stringify(synthMetadata, null, 2)}\n\nUser's stated primary goal: ${primaryGoal}\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
+Cards Metadata:
+${stringifiedData}`;
 
-        const finalRecommendation = await callOpenRouter(env, 'deepseek/deepseek-v4-flash', synthesizerPrompt, synthesizerUserMessage);
+        const finalRecommendation = await callOpenRouter(env, 'meta-llama/llama-3.3-70b-instruct', systemPrompt, userMessage);
         
         return new Response(JSON.stringify({ success: true, recommendation: finalRecommendation }), { status: 200, headers: corsHeaders });
       }

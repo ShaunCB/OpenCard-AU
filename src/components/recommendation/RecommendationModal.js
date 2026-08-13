@@ -37,40 +37,15 @@ const PARALLEL_TAGLINES = [
   'Almost there — comparing the fine print so you don\'t have to…',
 ];
 
-// Agent definitions — each maps to a real API action and carries consumer-facing copy.
 const AGENT_DEFINITIONS = [
   {
-    id: 'pre',
-    action: 'run_prescreen',
-    label: 'Pre-Screener',
-    description: 'Filtering all available market cards...',
-    model: 'KIMI K2.7 (262K CONTEXT)',
-    icon: '🔍',
-  },
-  {
-    id: 'math',
-    action: 'run_math',
-    label: 'Value & Cost Analyst',
-    description: 'Calculating fees, interest & estimated rewards return',
-    model: 'DEEPSEEK V4 FLASH',
-    icon: '💰',
-  },
-  {
-    id: 'risk',
-    action: 'run_risk',
-    label: 'Eligibility Checker',
-    description: 'Verifying you qualify and flagging any hidden risks',
-    model: 'DEEPSEEK V4 FLASH',
-    icon: '🛡️',
-  },
-  {
-    id: 'synth',
-    action: 'run_synth',
-    label: 'Recommendation Editor',
-    description: 'Synthesising findings into your personalised shortlist',
-    model: 'DEEPSEEK V4 FLASH',
-    icon: '✨',
-  },
+    id: 'analysis',
+    action: 'run_single_analysis',
+    label: 'AI Architect',
+    description: 'Pre-screening, calculating value, and synthesising recommendation...',
+    model: 'LLAMA 3.3 70B INSTRUCT (131K CONTEXT)',
+    icon: '🤖',
+  }
 ];
 
 // Possible status values for each agent row
@@ -436,11 +411,39 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
 
   // Multi-agent progress: map of agentId → STATUS value
   const [agentStatus, setAgentStatus] = useState({
-    pre: STATUS.IDLE,
-    math: STATUS.IDLE,
-    risk: STATUS.IDLE,
-    synth: STATUS.IDLE,
+    analysis: STATUS.IDLE,
   });
+
+  const [isPrefetching, setIsPrefetching] = useState(false);
+  const [cachedCdrProducts, setCachedCdrProducts] = useState(null);
+
+  useEffect(() => {
+    if (open && !cachedCdrProducts && !isPrefetching) {
+      const prefetch = async () => {
+        setIsPrefetching(true);
+        try {
+          const res = await fetch(WORKER_URL, {
+            method: 'POST',
+            // Passcode is required by worker, even for prefetch if worker enforces it
+            // If the user hasn't authenticated yet, it will fail.
+            // Wait, worker requires passcode? Yes, 'x-passcode' header.
+            // We'll pass it if we have it, or skip. If the worker fails, we will fallback to fetching inside handleAnalyze.
+            headers: { 'Content-Type': 'application/json', 'x-passcode': passcode || '' },
+            body: JSON.stringify({ action: 'prefetch_data' })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success) {
+              setCachedCdrProducts(data.cdrProducts);
+            }
+          }
+        } catch (e) {
+          console.error("Prefetch failed:", e);
+        }
+      };
+      prefetch();
+    }
+  }, [open, cachedCdrProducts, isPrefetching, passcode]);
 
   // Tagline cycling state — only active during the parallel phase
   const [taglineIdx, setTaglineIdx] = useState(0);
@@ -470,7 +473,7 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     setAgentStatus(prev => ({ ...prev, [id]: status }));
 
   const resetAgentStatus = () =>
-    setAgentStatus({ pre: STATUS.IDLE, math: STATUS.IDLE, risk: STATUS.IDLE, synth: STATUS.IDLE });
+    setAgentStatus({ analysis: STATUS.IDLE });
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   const handleLogin = async () => {
@@ -577,53 +580,23 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
         }
       };
 
-      // Phase 1: Pre-Screener — worker will use DEFAULT_BANK_URLS if no banking URLs provided
-      setAgent('pre', STATUS.THINKING);
-      startTaglineCycle('parallel');
+      setAgent('analysis', STATUS.THINKING);
       
-      // Only send bankUrls if we have banking-specific ones from Redux; otherwise
-      // the worker defaults to the hardcoded CDR bank list (AmEx, CommBank, Latitude, NAB, Westpac)
-      const prescreenData = await fetchAgent('run_prescreen', bankUrls && bankUrls.length > 0 ? { bankUrls } : {});
-      const topProducts = prescreenData.topProducts;
+      let finalCdrData = cachedCdrProducts;
+      if (!finalCdrData) {
+        // Fallback to fetch if prefetch failed or wasn't ready
+        const pf = await fetchAgent('prefetch_data', {});
+        finalCdrData = pf.cdrProducts;
+      }
       
-      if (!topProducts || topProducts.length === 0) {
+      if (!finalCdrData || finalCdrData.length === 0) {
         const err = new Error("No eligible credit cards were found in the provided data sources. Please try adding different banks.");
         err.name = "DataValidationError";
         throw err;
       }
       
-      setAgent('pre', STATUS.DONE);
-
-      // Phase 2: parallel agents (Worker fetches /products/{id} for top 5 and runs Math/Risk concurrently)
-      setAgent('math', STATUS.THINKING);
-      setAgent('risk', STATUS.THINKING);
-
-      let mathAnalysis, riskAnalysis;
-      try {
-        const analysisData = await fetchAgent('run_analysis', { topProducts });
-        mathAnalysis = analysisData.mathAnalysis;
-        riskAnalysis = analysisData.riskAnalysis;
-        setAgent('math', STATUS.DONE);
-        setAgent('risk', STATUS.DONE);
-      } catch (err) {
-        setAgent('math', STATUS.ERROR);
-        setAgent('risk', STATUS.ERROR);
-        throw err;
-      }
-
-      // Phase 3: synthesizer
-      stopTaglines();
-      setTaglinePhase('synth');
-      setAgent('synth', STATUS.THINKING);
-
-      const synthData = await fetchAgent('run_synth', {
-        mathAnalysis,
-        riskAnalysis,
-        topProducts,
-      });
-
-      setAgent('synth', STATUS.DONE);
-      stopTaglines();
+      const synthData = await fetchAgent('run_single_analysis', { cdrProducts: finalCdrData });
+      setAgent('analysis', STATUS.DONE);
       
       try {
         const cleaned = synthData.recommendation.replace(/```json/gi, '').replace(/```/g, '').trim();
