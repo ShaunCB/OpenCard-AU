@@ -178,7 +178,7 @@ export default {
 
         const fetchResults = await Promise.all(
           bankUrls.map(async bankUrl => {
-            const productsUrl = bankUrl.replace(/\/$/, '') + '/banking/products?product-category=CRED_AND_CHRG_CARDS';
+            const productsUrl = bankUrl.replace(/\/$/, '') + '/cds-au/v1/banking/products?product-category=CRED_AND_CHRG_CARDS';
             // Products list: x-v 5, x-min-v 4
             const res = await fetchBankData(productsUrl, env, '5', '4');
             if (!res || !res.data || !res.data.products) {
@@ -245,7 +245,7 @@ Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markd
         if (topProducts.length === 0) return new Response(JSON.stringify({ error: 'Bad Request', details: 'No topProducts provided.' }), { status: 400, headers: corsHeaders });
 
         const fetchPromises = topProducts.map(tp => {
-          const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/banking/products/' + encodeURIComponent(tp.id);
+          const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/cds-au/v1/banking/products/' + encodeURIComponent(tp.id);
           return fetchBankData(detailUrl, env, '7', '6').then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
         });
         
@@ -305,7 +305,7 @@ Be conservative: if in doubt, flag as a risk.`;
         if (topProducts.length === 0) return new Response(JSON.stringify({ error: 'Bad Request', details: 'No topProducts provided.' }), { status: 400, headers: corsHeaders });
 
         const fetchPromises = topProducts.map(tp => {
-          const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/banking/products/' + encodeURIComponent(tp.id);
+          const detailUrl = tp.bankUrl.replace(/\/$/, '') + '/cds-au/v1/banking/products/' + encodeURIComponent(tp.id);
           return fetchBankData(detailUrl, env, '7', '6').then(res => res && res.data ? { ...res.data, _bankUrl: tp.bankUrl } : null);
         });
         const detailResults = (await Promise.all(fetchPromises)).filter(p => p);

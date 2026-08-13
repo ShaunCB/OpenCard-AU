@@ -538,11 +538,13 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
         return data;
       };
 
-      // Phase 1: Pre-Screener (Fetches all /products from bankUrls)
+      // Phase 1: Pre-Screener — worker will use DEFAULT_BANK_URLS if no banking URLs provided
       setAgent('pre', STATUS.THINKING);
       startTaglineCycle('parallel');
       
-      const prescreenData = await fetchAgent('run_prescreen', { bankUrls });
+      // Only send bankUrls if we have banking-specific ones from Redux; otherwise
+      // the worker defaults to the hardcoded CDR bank list (AmEx, CommBank, Latitude, NAB, Westpac)
+      const prescreenData = await fetchAgent('run_prescreen', bankUrls && bankUrls.length > 0 ? { bankUrls } : {});
       const topProducts = prescreenData.topProducts;
       
       if (!topProducts || topProducts.length === 0) {
@@ -1052,7 +1054,10 @@ const mapStateToProps = (state) => {
       }
     }
   }
-  const bankUrls = (state.dataSources || []).map(src => src.url).filter(Boolean);
+  const bankUrls = (state.dataSources || [])
+    .filter(src => src.url && !src.deleted && (src.sectors?.includes('banking') || src.sectors?.includes('non-bank-lending') || !src.sectors))
+    .map(src => src.url)
+    .filter(Boolean);
   return { cdrProducts: allProductDetails, bankUrls };
 };
 
