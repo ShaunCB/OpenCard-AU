@@ -12,13 +12,20 @@ import { marked } from 'marked';
 const WORKER_URL = 'https://cdr-recommender.mr-shaun.workers.dev';
 
 const GOAL_OPTIONS = [
-  'Low Interest Rate',
-  'Rewards & Points (Frequent Flyer)',
-  'No Annual Fee',
-  'Travel Benefits & Insurance',
-  'Balance Transfer',
+  'General Reward Points (Flexible bank points)',
+  'Frequent Flyer / Airline Miles',
   'Cashback',
-  'No Foreign Transaction Fees',
+  'Premium Travel Perks (Lounge access, travel credit)',
+  '0% Intro APR / Balance Transfer',
+];
+
+const CATEGORY_OPTIONS = [
+  'Groceries',
+  'Dining/Takeout',
+  'Travel',
+  'Gas/Transit',
+  'Online Shopping',
+  'General/Other'
 ];
 
 // Consumer-friendly taglines that cycle during the parallel analysis phase.
@@ -408,8 +415,10 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
   const [passcode, setPasscode] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [primaryGoal, setPrimaryGoal] = useState('');
+  const [payInFull, setPayInFull] = useState('');
+  const [topCategories, setTopCategories] = useState([]);
   const [income, setIncome] = useState('100000');
-  const [monthlySpend, setMonthlySpend] = useState('2500');
+  const [monthlySpend, setMonthlySpend] = useState('5000');
   const [age, setAge] = useState('30');
   const [extraNeeds, setExtraNeeds] = useState('');
 
@@ -418,8 +427,12 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
   const [error, setError] = useState(null);
   const [recommendation, setRecommendation] = useState(null);
   
-  // Info tooltip modal state
   const [infoModalState, setInfoModalState] = useState({ open: false, content: '' });
+
+  // Cutting Room Floor state
+  const [excludedCardId, setExcludedCardId] = useState('');
+  const [exclusionReasoning, setExclusionReasoning] = useState(null);
+  const [exclusionLoading, setExclusionLoading] = useState(false);
 
   // Multi-agent progress: map of agentId → STATUS value
   const [agentStatus, setAgentStatus] = useState({
@@ -486,17 +499,23 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
 
   // ── Analysis pipeline ────────────────────────────────────────────────────────
   const handleAnalyze = async () => {
+    if (!primaryGoal || !payInFull) {
+      setError({ name: 'Validation', message: 'Please complete all required fields.' });
+      return;
+    }
     setLoading(true);
     setError(null);
     resetAgentStatus();
 
     try {
-      const profile = {
-        age: parseIntSafe(age, 28),
-        income: parseIntSafe(income, 60000),
-        monthlySpend: parseIntSafe(monthlySpend, 2500),
-        primaryGoal,
-        needs: extraNeeds,
+      const profile = { 
+        primaryGoal, 
+        payInFull, 
+        topCategories, 
+        income: parseIntSafe(income, 100000),
+        monthlySpend: parseIntSafe(monthlySpend, 5000),
+        age: parseIntSafe(age, 30),
+        needs: extraNeeds 
       };
       const baseReq = {
         method: 'POST',
@@ -628,6 +647,30 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     }
   };
 
+  const handleAssessExclusion = async (cardId) => {
+    setExcludedCardId(cardId);
+    setExclusionReasoning(null);
+    if (!cardId) return;
+    
+    setExclusionLoading(true);
+    try {
+      const profile = { primaryGoal, payInFull, topCategories, income: parseIntSafe(income, 100000), monthlySpend: parseIntSafe(monthlySpend, 5000), age: parseIntSafe(age, 30), needs: extraNeeds };
+      
+      // We pass the raw cdrProduct detail directly to avoid worker re-fetching
+      const targetCard = cdrProducts.find(c => c.productId === cardId);
+      
+      const res = await fetchAgent('run_exclusion_reasoning', { 
+        cardId, 
+        targetCard,
+      });
+      setExclusionReasoning(res.reasoning);
+    } catch (err) {
+      setExclusionReasoning("Failed to fetch exclusion reasoning: " + err.message);
+    } finally {
+      setExclusionLoading(false);
+    }
+  };
+
   // ── Delegated Click Handler for AI Tooltips ────────────────────────────────
   const handleMarkdownClick = (e) => {
     const btn = e.target.closest('.info-btn');
@@ -643,8 +686,10 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     setPasscode('');
     setIsAuthenticated(false);
     setPrimaryGoal('');
+    setPayInFull('');
+    setTopCategories([]);
     setIncome('100000');
-    setMonthlySpend('2500');
+    setMonthlySpend('5000');
     setAge('30');
     setExtraNeeds('');
     setRecommendation(null);
@@ -734,6 +779,40 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
                     <em>— Select a goal —</em>
                   </MenuItem>
                   {GOAL_OPTIONS.map(opt => (
+                    <MenuItem key={opt} value={opt}>{opt}</MenuItem>
+                  ))}
+                </TextField>
+                
+                <TextField
+                  select
+                  fullWidth
+                  variant="outlined"
+                  label="Do you typically pay your balance in full every month? *"
+                  value={payInFull}
+                  onChange={(e) => setPayInFull(e.target.value)}
+                  margin="normal"
+                  InputLabelProps={{ shrink: true }}
+                >
+                  <MenuItem value=""><em>— Select —</em></MenuItem>
+                  <MenuItem value="Yes">Yes, I pay it in full</MenuItem>
+                  <MenuItem value="No, I carry a balance">No, I carry a balance</MenuItem>
+                </TextField>
+
+                <TextField
+                  select
+                  fullWidth
+                  variant="outlined"
+                  label="What are your top two monthly spending categories?"
+                  value={topCategories}
+                  onChange={(e) => setTopCategories(e.target.value)}
+                  margin="normal"
+                  InputLabelProps={{ shrink: true }}
+                  SelectProps={{
+                    multiple: true,
+                    renderValue: (selected) => selected.join(', '),
+                  }}
+                >
+                  {CATEGORY_OPTIONS.map(opt => (
                     <MenuItem key={opt} value={opt}>{opt}</MenuItem>
                   ))}
                 </TextField>
@@ -967,6 +1046,23 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
                     </ul>
                   </div>
 
+                  {card.decisionMatrix && (
+                    <div style={{ marginTop: '12px', padding: '8px', backgroundColor: '#f8fafc', borderRadius: '4px', fontSize: '0.85rem' }}>
+                      <details>
+                        <summary style={{ cursor: 'pointer', fontWeight: 'bold', color: '#334155' }}>🧠 AI Decision Matrix</summary>
+                        <div style={{ marginTop: '8px' }}>
+                          <strong>Inclusion Steps:</strong>
+                          <ul style={{ paddingLeft: '16px', margin: '4px 0' }}>
+                            {card.decisionMatrix.inclusionSteps && card.decisionMatrix.inclusionSteps.map((step, i) => <li key={i}>{step}</li>)}
+                          </ul>
+                          <div style={{ marginTop: '8px' }}>
+                            <strong>The Decisive Factor:</strong> {card.decisionMatrix.decisiveFactor}
+                          </div>
+                        </div>
+                      </details>
+                    </div>
+                  )}
+
                   <div style={{ marginTop: 'auto', paddingTop: '16px' }}>
                     <Button 
                       variant={idx < 2 ? "contained" : "outlined"} 
@@ -998,6 +1094,39 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
                 </ul>
               </div>
             )}
+
+            <div style={{ marginTop: '24px', padding: '16px', backgroundColor: '#f1f5f9', borderRadius: '8px' }}>
+              <Typography variant="subtitle1" style={{ fontWeight: 'bold' }}>✂️ The Cutting Room Floor</Typography>
+              <Typography variant="body2" style={{ marginBottom: '12px', color: '#475569' }}>
+                In-Scope Cards Not Recommended. Select a card to see exactly why the AI excluded it based on your profile.
+              </Typography>
+              <TextField
+                select
+                fullWidth
+                variant="outlined"
+                label="Select an excluded card"
+                value={excludedCardId}
+                onChange={(e) => handleAssessExclusion(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+              >
+                <MenuItem value=""><em>— Select a card —</em></MenuItem>
+                {cdrProducts && cdrProducts
+                  .filter(p => !recommendation.cards.find(c => c.name === p.name))
+                  .map(p => (
+                    <MenuItem key={p.productId} value={p.productId}>{p.name} ({p.brand})</MenuItem>
+                  ))}
+              </TextField>
+              
+              {exclusionLoading && (
+                <div style={{ marginTop: '12px', color: '#64748b' }}>Assessing reasoning...</div>
+              )}
+              
+              {exclusionReasoning && !exclusionLoading && (
+                <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #cbd5e1' }}>
+                  <Typography variant="body2"><strong>AI Assessment:</strong> {exclusionReasoning}</Typography>
+                </div>
+              )}
+            </div>
 
             <Typography variant="caption" style={{ color: '#64748b', display: 'block', marginTop: 16, textAlign: 'center' }}>
               <em>* Estimations are based on the user-provided financial profile and publicly available CDR product data.</em>

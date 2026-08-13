@@ -3,7 +3,7 @@ import DataSourcePanel from './data-source/DataSourcePanel'
 import BankingPanel from './data/banking/BankingPanel'
 import ConsolePanel from './data/ConsolePanel'
 import Header from './header'
-import { Container } from '@material-ui/core'
+import { Container, Button } from '@material-ui/core'
 import { makeStyles } from '@material-ui/core/styles'
 import BankingComparisonPanel from './comparison/BankingComparisonPanel'
 import AppBar from '@material-ui/core/AppBar'
@@ -60,12 +60,22 @@ function Page() {
         <ConsolePanel/>
       </div>
       
-      {/* Global Footer (Mandatory positioning) */}
-      <div style={{ textAlign: 'center', color: '#64748b', fontSize: '0.9rem', padding: '32px 0' }}>
-        <span onClick={handleSecretClick} style={{ cursor: 'default', userSelect: 'none' }}>
+      {/* Global Footer & Recommender Launch */}
+      <div style={{ textAlign: 'center', padding: '32px 0' }}>
+        <Button 
+          variant="contained" 
+          color="secondary" 
+          size="large" 
+          onClick={() => setModalOpen(true)}
+          style={{ marginBottom: '16px', fontWeight: 'bold' }}
+        >
+          Launch Card Recommender
+        </Button>
+        <br/>
+        <span style={{ color: '#64748b', fontSize: '0.9rem' }}>
           A Technical Showcase of CDR Product Data.<br/>
         </span>
-        <span style={{ fontSize: '0.8rem' }}>This tool provides general information only and does not constitute financial advice.</span>
+        <span style={{ color: '#64748b', fontSize: '0.8rem' }}>This tool provides general information only and does not constitute financial advice.</span>
       </div>
       
       <RecommendationModal open={modalOpen} onClose={() => setModalOpen(false)} />

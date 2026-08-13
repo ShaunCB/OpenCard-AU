@@ -225,6 +225,8 @@ export default {
         
         const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nAvailable Credit Cards:\n${JSON.stringify(minifiedData, null, 2)}`;
         const prescreenPrompt = `You are a high-speed AI screener. Filter the provided credit/charge cards based on the user's profile.
+CRITICAL SCOPE RULE: If the user's primary goal is "0% Intro APR / Balance Transfer", you MUST instantly exclude any card that does not explicitly offer balance transfers (e.g. Charge Cards or most Amex cards without BT features).
+
 Return ONLY a raw JSON array of the top 5 most relevant products. Format strictly as:
 [{"card_id": "exact-id-1", "matched_perks": ["perk1", "perk2"]}]
 No markdown, no explanation, no prose. Use exact "id" strings.`;
@@ -267,16 +269,35 @@ No markdown, no explanation, no prose. Use exact "id" strings.`;
         const minifiedData = minifyCdrData(detailResults);
         const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nCandidate Cards Details:\n${JSON.stringify(minifiedData, null, 2)}`;
 
-        const { income, monthlySpend, primaryGoal, age, needs: rawExtraNeeds } = userProfile;
+        const { income, monthlySpend, primaryGoal, age, needs: rawExtraNeeds, payInFull, topCategories } = userProfile;
         const safeExtraNeeds = sanitizePromptInput(rawExtraNeeds);
+        const cats = Array.isArray(topCategories) ? topCategories.join(', ') : 'None specified';
 
         const mathAgentPrompt = `You are a Value & Cost Analyst. Calculate true annual cost/value for each card.
-Formula: Net Annual Cost = (Annual Fee + Est Interest) - Est Reward Value
-Interest: (Monthly Spend * 0.30 * 12 * Purchase Rate). For Charge Cards, Interest = 0.
-Return ONLY a raw JSON object mapped by card_id. No prose, no CoT.
+User Input:
+- Pays balance in full: ${payInFull}
+- Monthly Spend: $${monthlySpend}
+- Top Categories: ${cats}
+
+Rules:
+1. Card Type: Determine if the product is a "Credit Card" or "Charge Card".
+2. Interest: If the user pays in full ("Yes"), interest is $0. If they carry a balance ("No"), calculate Est Interest on revolving 30% of their monthly spend (i.e., Monthly Spend * 0.30 * 12 * Purchase Rate). However, if it's a Charge Card, Interest is ALWAYS N/A (must be paid in full).
+3. Rewards: Calculate estimated value based on their top categories vs the card's points program.
+4. Net Annual Cost = (Annual Fee + Est Interest) - Est Reward Value.
+
+Provide exact mathematical derivation strings for explanations (e.g., "$5000 spend * 12 months = 60,000 points...").
+
+Return ONLY a raw JSON object mapped by card_id. No prose.
 Format:
 {
-  "card_id": { "cardType": "Credit Card", "annualFee": 150, "estInterest": 0, "estRewardValue": 50, "netAnnualCost": 100, "goalAlignmentScore": 4 }
+  "card_id": { 
+    "cardType": "Credit Card", 
+    "annualFee": 150, 
+    "estInterest": { "value": 0, "explanation": "Calculated on a revolving balance of $0..." }, 
+    "estRewardValue": { "value": 50, "explanation": "($5000 monthly spend * 12) = ..." }, 
+    "netAnnualCost": { "value": 100, "explanation": "Formula: Annual Fee ($150) + Est. Interest ($0) - Est. Reward Value ($50) = $100" }, 
+    "goalAlignmentScore": 4 
+  }
 }`;
 
         const riskAgentPrompt = `You are an Eligibility Checker. Perform strict boolean evaluation on eligibility criteria.
@@ -326,11 +347,15 @@ JSON SCHEMA:
       "applicationUri": "application url or null",
       "eligibility": "Eligibility status",
       "annualFee": "Annual fee string",
-      "estAnnualInterest": { "display": "Value string", "explanation": "Brief explanation" },
+      "estAnnualInterest": { "display": "Value string (or N/A for charge cards)", "explanation": "Exact mathematical derivation from Math Agent" },
       "avoidableFees": { "display": "Value string", "explanation": "Brief explanation" },
-      "estRewardValue": { "display": "Value string", "explanation": "Brief explanation" },
-      "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Brief explanation" },
+      "estRewardValue": { "display": "Value string", "explanation": "Exact mathematical derivation from Math Agent" },
+      "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Mathematical formula string from Math Agent" },
       "keyRisks": ["Risk 1", "Risk 2"],
+      "decisionMatrix": {
+        "inclusionSteps": ["Step 1 explaining why this matched their profile", "Step 2"],
+        "decisiveFactor": "The single most important metric or perk that placed this card here."
+      },
       "goalAlignment": "X/5"
     }
   ],
@@ -348,9 +373,34 @@ JSON SCHEMA:
 
         const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards Metadata:\n${JSON.stringify(synthMetadata, null, 2)}\n\nUser's stated primary goal: ${primaryGoal}\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
 
-        const finalRecommendation = await callOpenRouter(env, 'deepseek/deepseek-chat', synthesizerPrompt, synthesizerUserMessage);
+        const finalRecommendation = await callOpenRouter(env, 'google/gemini-2.5-pro', synthesizerPrompt, synthesizerUserMessage);
         
         return new Response(JSON.stringify({ success: true, recommendation: finalRecommendation }), { status: 200, headers: corsHeaders });
+      }
+      
+      // 4. Cutting Room Floor Assessment
+      if (body.action === 'run_exclusion_reasoning') {
+        const { cardId, targetCard } = body;
+        if (!cardId || !targetCard) return new Response(JSON.stringify({ error: 'Missing card details.' }), { status: 400, headers: corsHeaders });
+        
+        const { income, monthlySpend, primaryGoal, age, needs: rawExtraNeeds, payInFull, topCategories } = userProfile;
+        const cats = Array.isArray(topCategories) ? topCategories.join(', ') : 'None specified';
+        
+        const reasoningPrompt = `You are a strict financial product reviewer. A user has asked why the following credit/charge card was EXCLUDED from their top recommendations.
+User Profile:
+- Goal: ${primaryGoal}
+- Pays balance in full: ${payInFull}
+- Spend: $${monthlySpend}/month (Top categories: ${cats})
+- Income: $${income}, Age: ${age}
+- Extra Needs: ${sanitizePromptInput(rawExtraNeeds)}
+
+Card Details:
+${JSON.stringify(minifyCdrData([targetCard])[0], null, 2)}
+
+Provide a concise, direct paragraph explaining exactly why this card was not a top recommendation for this specific user. Be highly specific (e.g. "Excluded because the user selected 'Balance Transfer', and this card does not offer balance transfer facilities" or "The $695 fee offsets the rewards on a $5k spend"). Do NOT output JSON, just the text string.`;
+
+        const reasoning = await callOpenRouter(env, 'google/gemini-2.5-pro', reasoningPrompt, "Explain exclusion now.");
+        return new Response(JSON.stringify({ success: true, reasoning: reasoning.trim() }), { status: 200, headers: corsHeaders });
       }
 
       return new Response(JSON.stringify({ error: 'Invalid action provided.' }), { status: 400, headers: corsHeaders });
