@@ -31,10 +31,11 @@ const CATEGORY_OPTIONS = [
 // Consumer-friendly taglines that cycle during the parallel analysis phase.
 // Designed to reassure without exposing internal technical detail.
 const PARALLEL_TAGLINES = [
-  'Crunching the numbers on fees, rates & rewards…',
-  'Checking your eligibility across all available cards…',
-  'Weighing up what matters most for your goal…',
-  'Almost there — comparing the fine print so you don\'t have to…',
+  'Analyzing your financial profile...',
+  'Scanning live market datasets...',
+  'Pre-screening card eligibility...',
+  'Calculating maximum value propositions...',
+  'Synthesizing optimal recommendations...'
 ];
 
 const AGENT_DEFINITIONS = [
@@ -108,10 +109,17 @@ const useStyles = makeStyles((theme) => ({
     color: '#0f172a',
     letterSpacing: '-0.01em',
     minHeight: '1.4em',          // prevents layout jump during tagline cycling
-    transition: 'opacity 0.4s ease',
     '@media (prefers-color-scheme: dark)': {
       color: '#f1f5f9',
     },
+  },
+  '@keyframes fadeSlideUp': {
+    '0%': { opacity: 0, transform: 'translateY(10px)' },
+    '100%': { opacity: 1, transform: 'translateY(0)' },
+  },
+  rotatingText: {
+    animation: '$fadeSlideUp 0.6s ease-out forwards',
+    display: 'inline-block',
   },
   loadingSubline: {
     textAlign: 'center',
@@ -580,19 +588,22 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     while (attempt <= MAX_RETRIES) {
       try {
         const controller = new AbortController();
-        const signalToUse = customSignal || controller.signal;
-        
-        let timeoutId;
-        if (!customSignal) {
-          timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
+        if (customSignal) {
+          if (customSignal.aborted) {
+            controller.abort();
+          } else {
+            customSignal.addEventListener('abort', () => controller.abort());
+          }
         }
+        
+        const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
         
         const res = await fetch(WORKER_URL, {
           ...baseReq,
           body: JSON.stringify({ action, profile, ...bodyData }),
-          signal: signalToUse
+          signal: controller.signal
         });
-        if (timeoutId) clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
         
         const textPayload = await res.text();
         let data;
@@ -617,6 +628,9 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
         return data;
       } catch (err) {
         if (err.name === 'AbortError') {
+          if (customSignal && customSignal.aborted) {
+            throw err; // Do not retry user/system aborts
+          }
           console.error(`[Credit Card Recommender Debug]: Request timeout on ${action} (attempt ${attempt + 1})`);
         } else {
           console.error(`[Credit Card Recommender Debug]: Network/CORS Error on ${action} (attempt ${attempt + 1})`, err);
@@ -934,28 +948,21 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
             {/* ── Loading panel ──────────────────────────────── */}
             {loading && (
               <div className={classes.loadingRoot} role="status" aria-live="polite" style={{ padding: '24px 16px' }}>
-                {/* Custom Spinner / Visual indicator */}
-                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
-                   <div style={{
-                     width: 40, height: 40, borderRadius: '50%',
-                     border: '4px solid #e2e8f0', borderTopColor: '#3b82f6',
-                     animation: 'spin 1s linear infinite'
-                   }}>
-                     <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-                   </div>
-                </div>
-
-                {/* Cycling tagline headline */}
+                {/* Main loading headline */}
                 <div className={classes.loadingHeadline} aria-live="polite" style={{ fontSize: '1.25rem', marginBottom: 8, color: '#1e293b' }}>
-                  {isAuthenticated ? headlineCopy : 'Verifying your access…'}
+                  {isAuthenticated ? 'Processing AI Recommendations' : 'Verifying your access…'}
                 </div>
 
                 {/* Only show agent rows during the analysis phase */}
                 {isAuthenticated && (
                   <>
-                    <Typography variant="body1" className={classes.loadingSubline} style={{ marginBottom: 32, fontSize: '0.95rem', lineHeight: 1.5, maxWidth: 500, margin: '0 auto', color: '#475569' }}>
-                      Our AI Architect is actively evaluating your financial profile against the live market dataset.
-                      <br /><strong style={{ color: '#0f172a' }}>This process usually takes 1–2 minutes.</strong> Hang tight!
+                    <Typography component="div" variant="body1" className={classes.loadingSubline} style={{ marginBottom: 32, fontSize: '0.95rem', lineHeight: 1.5, maxWidth: 500, margin: '0 auto', color: '#475569' }}>
+                      <div key={taglineIdx} className={classes.rotatingText} style={{ minHeight: '1.5em', fontWeight: 500 }}>
+                        {headlineCopy}
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        <strong style={{ color: '#0f172a' }}>This process usually takes 1–2 minutes.</strong> Hang tight!
+                      </div>
                     </Typography>
                     
                     <div style={{ maxWidth: 500, margin: '24px auto 0' }}>
