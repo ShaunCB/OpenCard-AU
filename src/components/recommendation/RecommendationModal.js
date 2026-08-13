@@ -645,6 +645,7 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     try {
 
       setAgent('analysis', STATUS.THINKING);
+      startTaglineCycle('parallel');
       
       const profileFilter = {
         income: parseIntSafe(income, 100000),
@@ -930,27 +931,42 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
               </>
             )}
 
-            {/* ── Multi-agent loading panel ──────────────────────────────── */}
+            {/* ── Loading panel ──────────────────────────────── */}
             {loading && (
-              <div className={classes.loadingRoot} role="status" aria-live="polite">
+              <div className={classes.loadingRoot} role="status" aria-live="polite" style={{ padding: '24px 16px' }}>
+                {/* Custom Spinner / Visual indicator */}
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+                   <div style={{
+                     width: 40, height: 40, borderRadius: '50%',
+                     border: '4px solid #e2e8f0', borderTopColor: '#3b82f6',
+                     animation: 'spin 1s linear infinite'
+                   }}>
+                     <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+                   </div>
+                </div>
+
                 {/* Cycling tagline headline */}
-                <div className={classes.loadingHeadline} aria-live="polite">
+                <div className={classes.loadingHeadline} aria-live="polite" style={{ fontSize: '1.25rem', marginBottom: 8, color: '#1e293b' }}>
                   {isAuthenticated ? headlineCopy : 'Verifying your access…'}
                 </div>
 
                 {/* Only show agent rows during the analysis phase */}
                 {isAuthenticated && (
                   <>
-                    <Typography variant="body2" className={classes.loadingSubline} style={{ marginBottom: 16 }}>
-                      Your analysis is being handled by our AI Architect.
+                    <Typography variant="body1" className={classes.loadingSubline} style={{ marginBottom: 32, fontSize: '0.95rem', lineHeight: 1.5, maxWidth: 500, margin: '0 auto', color: '#475569' }}>
+                      Our AI Architect is actively evaluating your financial profile against the live market dataset.
+                      <br /><strong style={{ color: '#0f172a' }}>This process usually takes 1–2 minutes.</strong> Hang tight!
                     </Typography>
-                    {AGENT_DEFINITIONS.map(agent => (
-                      <AgentProgressRow
-                        key={agent.id}
-                        agent={agent}
-                        status={agentStatus[agent.id]}
-                      />
-                    ))}
+                    
+                    <div style={{ maxWidth: 500, margin: '24px auto 0' }}>
+                      {AGENT_DEFINITIONS.map(agent => (
+                        <AgentProgressRow
+                          key={agent.id}
+                          agent={agent}
+                          status={agentStatus[agent.id]}
+                        />
+                      ))}
+                    </div>
                   </>
                 )}
               </div>
