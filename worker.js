@@ -7,7 +7,7 @@ const corsHeaders = {
 // Default CDR data holders for credit & charge card recommendations.
 // These are confirmed publicBaseUris from the Australian CDR Register / data holders.
 const DEFAULT_BANK_URLS = [
-  'https://apigw.americanexpress.com/cdr/unauth/cds-au/v1', // American Express
+  'https://apigw.americanexpress.com/cdr/unauth',            // American Express (fixed base URL)
   'https://api.commbank.com.au/public',                      // Commonwealth Bank
   'https://api.productcloud.com.au/public/LATITUDECARDS',    // Latitude Credit Cards
   'https://openbank.api.nab.com.au',                         // National Australia Bank
@@ -148,8 +148,8 @@ async function callOpenRouter(env, requestedModel, systemPrompt, userMessage) {
   try {
     return await attemptCall(requestedModel);
   } catch (error) {
-    console.warn(`[Model Fallback] Requested model '${requestedModel}' failed (${error.message}). Falling back to google/gemini-2.5-pro.`);
-    return await attemptCall('google/gemini-2.5-pro');
+    console.warn(`[Model Fallback] Requested model '${requestedModel}' failed (${error.message}). Falling back to deepseek/deepseek-v4-flash.`);
+    return await attemptCall('deepseek/deepseek-v4-flash');
   }
 }
 
@@ -191,7 +191,7 @@ export default {
 
         const fetchResults = await Promise.all(
           bankUrls.map(async bankUrl => {
-            const productsUrl = bankUrl.replace(/\/$/, '') + '/cds-au/v1/banking/products?product-category=CRED_AND_CHRG_CARDS';
+            const productsUrl = bankUrl.replace(/\/$/, '') + '/cds-au/v1/banking/products?product-category=CRED_AND_CHRG_CARDS&page-size=100';
             // Products list: x-v 5, x-min-v 4
             const res = await fetchBankData(productsUrl, env, '5', '4');
             if (!res || !res.data || !res.data.products) {
