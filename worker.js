@@ -169,6 +169,12 @@ export default {
         
         const allResults = await Promise.all(fetchPromises);
         const rawCdrProducts = allResults.flat();
+        
+        if (rawCdrProducts.length === 0) {
+          console.error("Worker Diagnostic: All bank fetches returned empty or failed. Possible Cloudflare IP block.");
+          return new Response(JSON.stringify({ error: 'Worker Fetch Failed', details: 'The banks blocked the data fetch from the Cloudflare Worker.' }), { status: 502, headers: corsHeaders });
+        }
+        
         const minifiedData = minifyCdrData(rawCdrProducts);
         
         const dataContext = `User Profile:\n${JSON.stringify(userProfile, null, 2)}\n\nAvailable Credit Cards:\n${JSON.stringify(minifiedData, null, 2)}`;
@@ -180,7 +186,8 @@ Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markd
         
         let topProductIds = [];
         try {
-          const jsonMatch = prescreenAnalysis.match(/\[.*\]/s);
+          // Use non-greedy regex to prevent matching trailing markdown backticks
+          const jsonMatch = prescreenAnalysis.match(/\[.*?\]/s);
           topProductIds = JSON.parse(jsonMatch ? jsonMatch[0] : prescreenAnalysis);
         } catch (e) {
           topProductIds = minifiedData.slice(0, 5).map(p => p.id);
@@ -189,6 +196,11 @@ Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markd
         const topProducts = minifiedData
           .filter(p => topProductIds.includes(p.id))
           .map(p => ({ id: p.id, bankUrl: p._bankUrl }));
+
+        if (topProducts.length === 0) {
+          console.error("Worker Diagnostic: LLM returned no valid IDs.", { prescreenAnalysis, topProductIds });
+          return new Response(JSON.stringify({ error: 'DataValidationError', details: 'The AI model hallucinated fake IDs or failed to find matches.', llmOutput: prescreenAnalysis }), { status: 502, headers: corsHeaders });
+        }
 
         return new Response(JSON.stringify({ success: true, topProducts }), { status: 200, headers: corsHeaders });
       }
