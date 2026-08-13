@@ -104,7 +104,8 @@ Execute the following logical steps internally before returning your output:
    - REWARD VALUATION RULES (CRITICAL): NEVER assume 1 Point = $1.00 AUD. You must apply these baseline valuations:
      - Airline Frequent Flyer Points (e.g., Velocity, Qantas): $0.01 AUD per point.
      - Flexible Bank Reward Points (e.g., Amex MR, CBA Awards, NAB Rewards): $0.005 AUD per point.
-   - Calculate Est. Net Annual Cost using this exact formula: Annual Fee - (Total Points * Point Value) + Estimated Annual Interest.
+   - CATEGORY SPEND ASSUMPTION: Do not apply the highest point multiplier to 100% of the spend. Assume a realistic split: 30% of spend goes to bonus categories (e.g., supermarkets/petrol at the higher rate) and 70% goes to the base 1x earn rate. Factor in flat annual perks like travel credits by adding them directly to the reward value.
+   - Calculate Est. Net Annual Cost using this exact formula: Annual Fee - (Total Reward Value) + Estimated Annual Interest.
 3. RISK ASSESSMENT: Flag any hidden risks (e.g., high cash advance rates, expiring introductory promotional periods, or international transaction fees) that conflict with the user's profile.
 4. SYNTHESIS: Select EXACTLY ONE Top Recommended Card and AT LEAST 3 Runner-Up Cards (you must recommend a minimum of 4 cards in total).
 
@@ -124,7 +125,7 @@ JSON SCHEMA:
       "annualFee": "Annual fee string",
       "estAnnualInterest": { "display": "Value string (or N/A for charge cards)", "explanation": "Exact mathematical derivation" },
       "avoidableFees": { "display": "Value string", "explanation": "Brief explanation" },
-      "estRewardValue": { "display": "Value string", "explanation": "Exact mathematical derivation based on point valuations" },
+      "estRewardValue": { "display": "Value string", "explanation": "MUST SHOW EXACT FORMULA like: Calculation: ((Annual Spend $48,000 x 30% in 3x category) + (Annual Spend $48,000 x 70% in 1x category)) x $0.005 per point + $200 Travel Credit = Total Est Value" },
       "estNetAnnualCost": { "display": "Value string", "numValue": -150, "explanation": "Exact breakdown, e.g. Annual Fee ($440) - Reward Value (75k pts x $0.01/pt = $750) + Interest ($0) = -$310 Net Cost" },
       "keyRisks": ["Risk 1", "Risk 2"],
       "decisionMatrix": {
@@ -151,7 +152,7 @@ JSON SCHEMA:
 Cards Metadata:
 ${stringifiedData}`;
 
-        const finalRecommendation = await callOpenRouter(env, 'meta-llama/llama-3.3-70b-instruct', systemPrompt, userMessage);
+        const finalRecommendation = await callOpenRouter(env, 'deepseek/deepseek-v4-flash', systemPrompt, userMessage);
         
         return new Response(JSON.stringify({ success: true, recommendation: finalRecommendation }), { status: 200, headers: corsHeaders });
       }

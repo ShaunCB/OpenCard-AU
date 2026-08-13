@@ -43,7 +43,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_single_analysis',
     label: 'AI Architect',
     description: 'Pre-screening, calculating value, and synthesising recommendation...',
-    model: 'LLAMA 3.3 70B INSTRUCT (131K CONTEXT)',
+    model: 'DEEPSEEK V4 FLASH',
     icon: '🤖',
   }
 ];
@@ -440,8 +440,8 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
   const [primaryGoal, setPrimaryGoal] = useState('');
   const [payInFull, setPayInFull] = useState('');
   const [topCategories, setTopCategories] = useState([]);
-  const [income, setIncome] = useState('100000');
-  const [monthlySpend, setMonthlySpend] = useState('5000');
+  const [income, setIncome] = useState('120000');
+  const [monthlySpend, setMonthlySpend] = useState('4000');
   const [age, setAge] = useState('30');
   const [extraNeeds, setExtraNeeds] = useState('');
 
@@ -468,6 +468,46 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
   const [taglineIdx, setTaglineIdx] = useState(0);
   const [taglinePhase, setTaglinePhase] = useState('idle'); // 'idle' | 'parallel' | 'synth'
   const taglineTimer = useRef(null);
+
+  // Optimistic Execution State
+  const [debouncedProfile, setDebouncedProfile] = useState(null);
+  const optimisticPromise = useRef(null);
+  const optimisticController = useRef(null);
+  
+  useEffect(() => {
+    // Only pre-fetch if mandatory fields are complete
+    if (primaryGoal && payInFull && income && age) {
+      const timer = setTimeout(() => {
+        setDebouncedProfile({ income, monthlySpend, age, primaryGoal, payInFull, extraNeeds, topCategories });
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [income, monthlySpend, age, primaryGoal, payInFull, extraNeeds, topCategories]);
+
+  useEffect(() => {
+    if (debouncedProfile && cdrProducts && cdrProducts.length > 0) {
+      if (optimisticController.current) {
+        optimisticController.current.abort();
+      }
+      const controller = new AbortController();
+      optimisticController.current = controller;
+
+      const profileFilter = {
+        income: parseIntSafe(debouncedProfile.income, 100000),
+        age: parseIntSafe(debouncedProfile.age, 30),
+        monthlySpend: parseIntSafe(debouncedProfile.monthlySpend, 5000)
+      };
+      
+      const finalCdrData = minifyCdrData(cdrProducts, profileFilter);
+      if (finalCdrData && finalCdrData.length > 0) {
+         optimisticPromise.current = fetchAgent('run_single_analysis', { cdrProducts: finalCdrData }, controller.signal)
+           .catch(err => {
+              if (err.name === 'AbortError') return null;
+              throw err;
+           });
+      }
+    }
+  }, [debouncedProfile, cdrProducts]);
 
   // Start tagline cycling
   const startTaglineCycle = (phase) => {
@@ -519,7 +559,7 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     }
   };
 
-  const fetchAgent = async (action, bodyData = {}) => {
+  const fetchAgent = async (action, bodyData = {}, customSignal = null) => {
     const profile = { 
       primaryGoal, 
       payInFull, 
@@ -540,14 +580,19 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
     while (attempt <= MAX_RETRIES) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
+        const signalToUse = customSignal || controller.signal;
+        
+        let timeoutId;
+        if (!customSignal) {
+          timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
+        }
         
         const res = await fetch(WORKER_URL, {
           ...baseReq,
           body: JSON.stringify({ action, profile, ...bodyData }),
-          signal: controller.signal
+          signal: signalToUse
         });
-        clearTimeout(timeoutId);
+        if (timeoutId) clearTimeout(timeoutId);
         
         const textPayload = await res.text();
         let data;
@@ -603,7 +648,8 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
       
       const profileFilter = {
         income: parseIntSafe(income, 100000),
-        age: parseIntSafe(age, 30)
+        age: parseIntSafe(age, 30),
+        monthlySpend: parseIntSafe(monthlySpend, 5000)
       };
       
       let finalCdrData = minifyCdrData(cdrProducts, profileFilter);
@@ -614,7 +660,21 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
         throw err;
       }
       
-      const synthData = await fetchAgent('run_single_analysis', { cdrProducts: finalCdrData });
+      let synthData;
+      if (optimisticPromise.current) {
+        // Attempt to await the pre-fetched promise to save huge amounts of time
+        try {
+          synthData = await optimisticPromise.current;
+        } catch(e) {
+          console.warn("Optimistic fetch failed, falling back to synchronous fetch", e);
+        }
+      }
+      
+      // If no optimistic promise existed, it returned null (aborted), or it failed, fetch normally.
+      if (!synthData) {
+        synthData = await fetchAgent('run_single_analysis', { cdrProducts: finalCdrData });
+      }
+
       setAgent('analysis', STATUS.DONE);
       
       try {
@@ -838,7 +898,7 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
                     />
                   </Grid>
                   <Grid item xs={12} sm={4}>
-                    <TextField fullWidth variant="outlined" label="Monthly Spend ($)"
+                    <TextField fullWidth variant="outlined" label="Monthly spend (excluding mortgage/rent)"
                       type="number" value={monthlySpend} onChange={(e) => setMonthlySpend(e.target.value)}
                       margin="normal" InputLabelProps={{ shrink: true }}
                       inputProps={{ min: 0, max: 999999, 'aria-label': 'Monthly Spend in dollars' }}
@@ -1240,6 +1300,7 @@ function minifyCdrData(prdArray, userProfile = {}) {
       id: product.productId,
       name: product.name,
       brand: product.brand || product.brandName,
+      image: (product.cardArt && product.cardArt.length > 0) ? product.cardArt[0].imageUri : null,
       features: [],
       fees: [],
       rates: [],
