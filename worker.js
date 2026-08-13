@@ -98,7 +98,7 @@ Execute the following logical steps internally before returning your output:
    - DO NOT exclude a card just because the user's income is ABOVE the minimum requirement. High-income users are fully eligible for basic/low-fee cards.
    - STRICT GOAL ALIGNMENT: The recommended cards MUST possess features that directly satisfy the user's Primary Goal (e.g., if the goal is 'Balance Transfer', the card MUST have a balance transfer feature; if 'Cashback', it MUST be a cashback card). Do not recommend irrelevant cards.
    - CRITICAL DATA HOLDER MANDATE: You must evaluate products across all provided issuers. If standard major bank cards (e.g., CommBank, NAB, Westpac) are excluded, you MUST document the specific disqualification reason for each in the "excludedMajorCards" array.
-   - PROVIDER DIVERSITY: Ensure your 3 recommended cards are diversified. Do NOT recommend 3 cards from the exact same provider/brand.
+   - PROVIDER DIVERSITY: Ensure your recommended cards are diversified. Do NOT recommend all 4 cards from the exact same provider/brand.
    - If the user's goal is "Flexible Bank Points", prioritize cards with flexible bank reward programs over direct-earn airline cards (like Velocity or Qantas).
 2. VALUE & COST ANALYSIS: For the remaining eligible cards, calculate the net annual value by weighing the annual fees and standard interest rates against the estimated rewards return based on the user's stated spending habits.
    - REWARD VALUATION RULES (CRITICAL): NEVER assume 1 Point = $1.00 AUD. You must apply these baseline valuations:
@@ -106,7 +106,7 @@ Execute the following logical steps internally before returning your output:
      - Flexible Bank Reward Points (e.g., Amex MR, CBA Awards, NAB Rewards): $0.005 AUD per point.
    - Calculate Est. Net Annual Cost using this exact formula: Annual Fee - (Total Points * Point Value) + Estimated Annual Interest.
 3. RISK ASSESSMENT: Flag any hidden risks (e.g., high cash advance rates, expiring introductory promotional periods, or international transaction fees) that conflict with the user's profile.
-4. SYNTHESIS: Select EXACTLY ONE Top Recommended Card and AT LEAST 2 Runner-Up Cards (you must recommend a minimum of 3 cards in total).
+4. SYNTHESIS: Select EXACTLY ONE Top Recommended Card and AT LEAST 3 Runner-Up Cards (you must recommend a minimum of 4 cards in total).
 
 Format your final output as a strict, structured JSON object containing the recommended card, a detailed numerical breakdown of its net value, the eligibility confidence score, any important risk warnings, and the excluded major cards reasoning. Do not include speculative financial or trading advice.
 
