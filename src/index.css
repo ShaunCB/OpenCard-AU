@@ -258,6 +258,39 @@ p.tree-element {
   font-size: 0.9rem;
 }
 
+/* ── Result page boxes ──────────────────────────────────────────────────────── */
+.goal-summary-box {
+  background-color: #f8fafc;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
+}
+.top-pick-box {
+  margin-top: 24px;
+  padding: 16px;
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  color: #92400e;
+}
+.top-pick-box .MuiTypography-root {
+  color: #92400e !important;
+}
+.data-gaps-box {
+  margin-top: 16px;
+  padding: 12px;
+  border-left: 4px solid #f59e0b;
+  background-color: #fffbeb;
+  color: #b45309;
+  border-radius: 0 4px 4px 0;
+}
+.data-gaps-box .MuiTypography-root,
+.data-gaps-box li {
+  color: #b45309 !important;
+}
+
 @media (prefers-color-scheme: dark) {
   body {
     background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
@@ -435,6 +468,33 @@ p.tree-element {
   }
   .checklist-box h4, .checklist-box ul {
     color: #86efac;
+  }
+  .goal-summary-box {
+    background-color: #1e293b;
+    border-color: #334155;
+    color: #f1f5f9;
+  }
+  .top-pick-box {
+    background-color: rgba(120, 53, 15, 0.3);
+    border-color: #92400e;
+    color: #fcd34d;
+  }
+  .top-pick-box .MuiTypography-root {
+    color: #fcd34d !important;
+  }
+  .data-gaps-box {
+    background-color: rgba(120, 53, 15, 0.2);
+    border-left-color: #f59e0b;
+    color: #fcd34d;
+  }
+  .data-gaps-box .MuiTypography-root,
+  .data-gaps-box li {
+    color: #fcd34d !important;
+  }
+  /* Override MuiPaper dark background for the ASIC disclaimer box only */
+  .MuiDialog-paper .MuiPaper-root.MuiPaper-elevation0 {
+    background-color: #451a03 !important;
+    color: #fed7aa !important;
   }
 }
 

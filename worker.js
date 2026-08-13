@@ -54,7 +54,12 @@ async function fetchBankData(url, env, xV = '5', xMinV = '4') {
 function minifyCdrData(prdArray) {
   if (!Array.isArray(prdArray)) return [];
 
-  return prdArray.map(product => {
+  // Hard-filter: only process credit & charge card products.
+  // This is the CDR product category for credit cards and charge cards.
+  const CARD_CATEGORIES = ['CRED_AND_CHRG_CARDS', 'BUSINESS_CARDS', 'CORPORATE_CARDS'];
+  const cardProducts = prdArray.filter(p => p && CARD_CATEGORIES.includes(p.productCategory));
+
+  return cardProducts.map(product => {
     const cardArtEntry = Array.isArray(product.cardArt)
       ? product.cardArt.find(a => a && a.imageUri)
       : null;
@@ -171,10 +176,9 @@ export default {
 
       // 1. Pre-Screening: Lazy fetch high-level products
       if (body.action === 'run_prescreen') {
-        // Use provided bankUrls, or fall back to the hardcoded defaults
-        const bankUrls = (Array.isArray(body.bankUrls) && body.bankUrls.length > 0)
-          ? body.bankUrls.slice(0, 5)
-          : DEFAULT_BANK_URLS;
+        // Always use DEFAULT_BANK_URLS — do NOT trust the frontend to supply correct bank URLs.
+        // The frontend may have energy or other non-banking data sources in Redux state.
+        const bankUrls = DEFAULT_BANK_URLS;
 
         const fetchResults = await Promise.all(
           bankUrls.map(async bankUrl => {

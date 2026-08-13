@@ -843,8 +843,8 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
         ) : (
           /* ── Results ─────────────────────────────────────────────────────── */
           <>
-            <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #e2e8f0' }}>
-              <Typography variant="subtitle2" style={{ color: '#0f172a' }}>
+            <div className="goal-summary-box">
+              <Typography variant="subtitle2">
                 <strong>AI Recommendations for:</strong> {recommendation.goalSummary || "Your profile"}
               </Typography>
             </div>
@@ -862,10 +862,29 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
               {recommendation.cards && recommendation.cards.map((card, idx) => (
                 <div key={idx} className="product-card">
                   {card.image ? (
-                    <img src={card.image.replace(/https:\/\/shauncb\.github\.io\/OpenCard-AU\/images\//g, import.meta.env.BASE_URL + 'images/')} alt={card.name} className="product-card-image" />
-                  ) : (
-                    <div className="product-card-image" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>No Image</div>
-                  )}
+                    <img
+                      src={card.image}
+                      alt={card.name}
+                      className="product-card-image"
+                      style={{ objectFit: 'contain', padding: '8px' }}
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                        e.target.nextSibling.style.display = 'flex';
+                      }}
+                    />
+                  ) : null}
+                  <div
+                    className="product-card-image"
+                    style={{
+                      display: card.image ? 'none' : 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#94a3b8',
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    No Image
+                  </div>
                   
                   <div className="product-card-header">
                     <h3 className="product-card-title">{card.name}</h3>
@@ -944,23 +963,23 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
             </div>
 
             {recommendation.topPickReason && (
-              <div style={{ marginTop: '24px', padding: '16px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px' }}>
-                <Typography variant="subtitle1" style={{ color: '#92400e', fontWeight: 'bold' }}>🏆 Top Pick:</Typography>
-                <Typography variant="body2" style={{ color: '#92400e' }}>{recommendation.topPickReason}</Typography>
+              <div className="top-pick-box">
+                <Typography variant="subtitle1" style={{ fontWeight: 'bold' }}>🏆 Top Pick:</Typography>
+                <Typography variant="body2">{recommendation.topPickReason}</Typography>
               </div>
             )}
 
             {recommendation.dataGaps && recommendation.dataGaps.length > 0 && (
-              <div style={{ marginTop: '16px', padding: '12px', borderLeft: '4px solid #f59e0b', backgroundColor: '#fffbeb' }}>
-                <Typography variant="subtitle2" style={{ color: '#b45309' }}>⚠️ Data Gaps</Typography>
-                <ul style={{ margin: 0, paddingLeft: '20px', color: '#b45309', fontSize: '0.85rem' }}>
+              <div className="data-gaps-box">
+                <Typography variant="subtitle2">⚠️ Data Gaps</Typography>
+                <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.85rem' }}>
                   {recommendation.dataGaps.map((gap, i) => <li key={i}>{gap}</li>)}
                 </ul>
               </div>
             )}
 
             <Typography variant="caption" style={{ color: '#64748b', display: 'block', marginTop: 16, textAlign: 'center' }}>
-              <em>* Estimations based on user-provided monthly spend and flying preference.</em>
+              <em>* Estimations are based on the user-provided financial profile and publicly available CDR product data.</em>
             </Typography>
           </>
         )}
