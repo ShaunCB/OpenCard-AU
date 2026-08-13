@@ -3,7 +3,7 @@ import { connect } from 'react-redux';
 import { 
   Dialog, DialogTitle, DialogContent, DialogActions, 
   Button, TextField, Typography, 
-  makeStyles, Paper, Grid
+  makeStyles, Paper, Grid, MenuItem
 } from '@material-ui/core';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
@@ -37,7 +37,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_prescreen',
     label: 'Pre-Screener',
     description: 'Filtering all available market cards...',
-    model: 'Gemini 2.5 Flash',
+    model: 'KIMI K2.7 (262K CONTEXT)',
     icon: '🔍',
   },
   {
@@ -45,7 +45,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_math',
     label: 'Value & Cost Analyst',
     description: 'Calculating fees, interest & estimated rewards return',
-    model: 'Gemini 2.5 Pro',
+    model: 'DEEPSEEK V4 PRO (1.6T REASONING)',
     icon: '💰',
   },
   {
@@ -53,7 +53,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_risk',
     label: 'Eligibility Checker',
     description: 'Verifying you qualify and flagging any hidden risks',
-    model: 'Gemini 2.5 Flash',
+    model: 'DEEPSEEK V4 FLASH',
     icon: '🛡️',
   },
   {
@@ -61,7 +61,7 @@ const AGENT_DEFINITIONS = [
     action: 'run_synth',
     label: 'Recommendation Editor',
     description: 'Synthesising findings into your personalised shortlist',
-    model: 'Gemini 2.5 Pro',
+    model: 'GPT-OSS-20B (OPENAI)',
     icon: '✨',
   },
 ];
@@ -708,12 +708,13 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
                   value={primaryGoal}
                   onChange={(e) => setPrimaryGoal(e.target.value)}
                   margin="normal"
-                  SelectProps={{ native: true }}
                   InputLabelProps={{ shrink: true }}
                 >
-                  <option value="">— Select a goal —</option>
+                  <MenuItem value="">
+                    <em>— Select a goal —</em>
+                  </MenuItem>
                   {GOAL_OPTIONS.map(opt => (
-                    <option key={opt} value={opt}>{opt}</option>
+                    <MenuItem key={opt} value={opt}>{opt}</MenuItem>
                   ))}
                 </TextField>
 

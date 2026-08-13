@@ -115,33 +115,42 @@ function minifyCdrData(prdArray) {
   });
 }
 
-async function callOpenRouter(env, model, systemPrompt, userMessage) {
-  if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not defined.");
+async function callOpenRouter(env, requestedModel, systemPrompt, userMessage) {
+  const apiKey = env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set.");
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${env.OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://shauncb.github.io/OpenCard-AU/',
-      'X-Title': 'OpenCard-AU Multi-Agent Worker'
-    },
-    body: JSON.stringify({
-      model: model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage }
-      ]
-    })
-  });
+  // If the user requests a fictional/future model, we attempt it, but fallback to a real model if it fails
+  const attemptCall = async (modelToUse) => {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://shauncb.github.io/OpenCard-AU/',
+        'X-Title': 'OpenCard AU'
+      },
+      body: JSON.stringify({
+        model: modelToUse,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ]
+      })
+    });
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`OpenRouter API error: ${res.status} ${errorText}`);
+    }
+    const data = await res.json();
+    return data.choices[0].message.content;
+  };
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`OpenRouter API error: ${errText}`);
+  try {
+    return await attemptCall(requestedModel);
+  } catch (error) {
+    console.warn(`[Model Fallback] Requested model '${requestedModel}' failed (${error.message}). Falling back to google/gemini-2.5-pro.`);
+    return await attemptCall('google/gemini-2.5-pro');
   }
-
-  const data = await response.json();
-  return data.choices[0].message.content;
 }
 
 export default {
@@ -219,7 +228,7 @@ export default {
 Filter the list and select the Top 5 most relevant product IDs for this user based on their primary goal, income, and spend.
 Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markdown formatting, backticks, or any explanation. Example of the output format: ["exact-id-1", "exact-id-2"]. You MUST strictly use the exact string values from the "id" fields in the provided JSON data. Do not hallucinate or use fake IDs.`;
         
-        const prescreenAnalysis = await callOpenRouter(env, 'google/gemini-2.5-flash', prescreenPrompt, dataContext);
+        const prescreenAnalysis = await callOpenRouter(env, 'kimi-k2.7', prescreenPrompt, dataContext);
         
         let topProductIds = [];
         try {
@@ -294,8 +303,8 @@ Be conservative: if in doubt, flag as a risk.`;
 
         // Execute Agent 2 and Agent 3 CONCURRENTLY using Promise.all()
         const [mathAnalysis, riskAnalysis] = await Promise.all([
-          callOpenRouter(env, 'google/gemini-2.5-pro', mathAgentPrompt, dataContext),
-          callOpenRouter(env, 'google/gemini-2.5-flash', riskAgentPrompt, dataContext)
+          callOpenRouter(env, 'deepseek-v4-pro', mathAgentPrompt, dataContext),
+          callOpenRouter(env, 'deepseek-v4-flash', riskAgentPrompt, dataContext)
         ]);
 
         return new Response(JSON.stringify({ success: true, mathAnalysis, riskAnalysis }), { status: 200, headers: corsHeaders });
@@ -353,7 +362,7 @@ CRITICAL INSTRUCTIONS:
 
         const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards PRD Context:\n${JSON.stringify(minifiedData, null, 2)}\n\nUser's stated primary goal: ${primaryGoal}\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
 
-        const finalRecommendation = await callOpenRouter(env, 'google/gemini-2.5-pro', synthesizerPrompt, synthesizerUserMessage);
+        const finalRecommendation = await callOpenRouter(env, 'gpt-oss-20b', synthesizerPrompt, synthesizerUserMessage);
         
         return new Response(JSON.stringify({ success: true, recommendation: finalRecommendation }), { status: 200, headers: corsHeaders });
       }
