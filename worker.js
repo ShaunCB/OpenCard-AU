@@ -228,7 +228,7 @@ export default {
 Filter the list and select the Top 5 most relevant product IDs for this user based on their primary goal, income, and spend.
 Return ONLY a raw JSON array of up to 5 product ID strings. Do not include markdown formatting, backticks, or any explanation. Example of the output format: ["exact-id-1", "exact-id-2"]. You MUST strictly use the exact string values from the "id" fields in the provided JSON data. Do not hallucinate or use fake IDs.`;
         
-        const prescreenAnalysis = await callOpenRouter(env, 'kimi-k2.7', prescreenPrompt, dataContext);
+        const prescreenAnalysis = await callOpenRouter(env, 'moonshotai/kimi-k2.7-code', prescreenPrompt, dataContext);
         
         let topProductIds = [];
         try {
@@ -303,8 +303,8 @@ Be conservative: if in doubt, flag as a risk.`;
 
         // Execute Agent 2 and Agent 3 CONCURRENTLY using Promise.all()
         const [mathAnalysis, riskAnalysis] = await Promise.all([
-          callOpenRouter(env, 'deepseek-v4-pro', mathAgentPrompt, dataContext),
-          callOpenRouter(env, 'deepseek-v4-flash', riskAgentPrompt, dataContext)
+          callOpenRouter(env, 'deepseek/deepseek-v4-pro', mathAgentPrompt, dataContext),
+          callOpenRouter(env, 'deepseek/deepseek-v4-flash', riskAgentPrompt, dataContext)
         ]);
 
         return new Response(JSON.stringify({ success: true, mathAnalysis, riskAnalysis }), { status: 200, headers: corsHeaders });
@@ -362,7 +362,7 @@ CRITICAL INSTRUCTIONS:
 
         const synthesizerUserMessage = `Math/Value Agent Analysis:\n${mathAnalysis}\n\nRisk/Eligibility Agent Analysis:\n${riskAnalysis}\n\nCards PRD Context:\n${JSON.stringify(minifiedData, null, 2)}\n\nUser's stated primary goal: ${primaryGoal}\nUser's extra notes: ${safeExtraNeeds}\n\nPlease synthesise into JSON now.`;
 
-        const finalRecommendation = await callOpenRouter(env, 'gpt-oss-20b', synthesizerPrompt, synthesizerUserMessage);
+        const finalRecommendation = await callOpenRouter(env, 'openai/gpt-oss-20b', synthesizerPrompt, synthesizerUserMessage);
         
         return new Response(JSON.stringify({ success: true, recommendation: finalRecommendation }), { status: 200, headers: corsHeaders });
       }
