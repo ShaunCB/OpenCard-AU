@@ -628,7 +628,14 @@ function RecommendationModal({ open, onClose, cdrProducts, bankUrls }) {
       setAgent('analysis', STATUS.DONE);
       
       try {
-        const cleaned = synthData.recommendation.replace(/```json/gi, '').replace(/```/g, '').trim();
+        let cleaned = synthData.recommendation;
+        const firstBrace = cleaned.indexOf('{');
+        const lastBrace = cleaned.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+        } else {
+          cleaned = cleaned.replace(/```json/gi, '').replace(/```/g, '').trim();
+        }
         setRecommendation(JSON.parse(cleaned));
       } catch (e) {
         console.error('[Credit Card Recommender Debug]: JSON Parse Recommendation Error', e);
